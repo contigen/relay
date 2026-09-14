@@ -6,7 +6,9 @@ export const createThread = mutation({
     jobId: v.id("jobs"),
     vendorName: v.string(),
     vendorEmail: v.string(),
+    vendorUrl: v.optional(v.string()),
     agentInboxId: v.string(),
+
     agentEmail: v.string(),
   },
   handler: async (ctx, args) => {

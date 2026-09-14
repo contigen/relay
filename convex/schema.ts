@@ -43,7 +43,9 @@ export default defineSchema({
     jobId: v.id("jobs"),
     vendorName: v.string(),
     vendorEmail: v.string(),
+    vendorUrl: v.optional(v.string()),
     agentInboxId: v.string(),
+
     agentEmail: v.string(),
     status: v.union(
       v.literal("pending"),

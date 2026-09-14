@@ -4,10 +4,12 @@ import { v } from "convex/values";
 export const createDecision = mutation({
   args: {
     jobId: v.id("jobs"),
+    threadId: v.optional(v.id("threads")),
     question: v.string(),
     options: v.array(v.string()),
     context: v.optional(v.string()),
   },
+
   handler: async (ctx, args) => {
     return await ctx.db.insert("decisions", {
       ...args,

@@ -6,19 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-
     "lint": "eslint",
     "deploy": "npx @convex-dev/static-hosting deploy -d out",
     "deploy:static": "npx @convex-dev/static-hosting upload -d out",
     "deploy:static:prod": "npx @convex-dev/static-hosting upload -d out --prod"
   },
-
   "dependencies": {
     "@agentmail/convex": "^0.1.0",
+    "@ai-sdk/google": "^4.0.69",
     "@convex-dev/static-hosting": "^0.2.1",
     "@firecrawl/firecrawl-convex": "^0.1.1",
     "@x402/fetch": "^2.25.0",
     "agentmail": "^0.5.23",
+    "ai": "^7.0.99",
     "convex": "^1.45.0",
     "firecrawl": "^4.38.0",
     "next": "16.3.5",

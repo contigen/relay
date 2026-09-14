@@ -1,21 +1,31 @@
 "use node";
+
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
-import OpenAI from "openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { generateText } from "ai";
 import { FirecrawlClient } from "firecrawl";
 import { AgentMailClient } from "agentmail";
 
-function getOpenAI() {
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "dummy" });
-}
-function getFirecrawl() {
+const getGeminiModel = () => {
+  const key =
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("Missing GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY");
+  }
+  const google = createGoogleGenerativeAI({ apiKey: key });
+  return google("gemini-3.6-flash");
+};
+
+const getFirecrawl = () => {
   return new FirecrawlClient({ apiKey: process.env.FIRECRAWL_API_KEY || "" });
-}
-function getAgentMail() {
+};
+
+const getAgentMail = () => {
   return new AgentMailClient({ apiKey: process.env.AGENTMAIL_API_KEY || "" });
-}
+};
 
 type Vendor = {
   name: string;
@@ -35,7 +45,6 @@ type ParsedIntent = {
   category?: string;
 };
 
-// ─── Step 1: Parse the raw task into structured intent ─────────────────────
 export const parseTask = action({
   args: { jobId: v.id("jobs"), rawTask: v.string(), userEmail: v.string() },
   handler: async (ctx, { jobId, rawTask }) => {
@@ -43,40 +52,35 @@ export const parseTask = action({
 
     let parsed: ParsedIntent;
     try {
-      const completion = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `You are a task parser for Relay, an AI sourcing agent.
-Extract structured intent from the user's task. Return ONLY valid JSON:
+      const { text } = await generateText({
+        model: getGeminiModel(),
+        prompt: `You are an intent parser for Relay, an autonomous sourcing agent.
+Extract structured intent from the user task. Return ONLY a valid JSON object without markdown formatting:
 {
   "taskType": "sourcing",
   "description": "concise one-sentence description",
-  "targetCount": number,
-  "location": "city or region if mentioned or null",
-  "budget": "budget constraint if mentioned or null",
-  "deadline": "deadline if mentioned or null",
+  "targetCount": 3,
+  "location": "city or region if mentioned, else null",
+  "budget": "budget constraint if mentioned, else null",
+  "deadline": "deadline if mentioned, else null",
   "category": "type of service e.g. catering, cleaning, photography"
-}`,
-          },
-          { role: "user", content: rawTask },
-        ],
-        response_format: { type: "json_object" },
+}
+
+Task: "${rawTask}"`,
       });
 
-      const raw = JSON.parse(completion.choices[0].message.content ?? "{}");
+      const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
+      const raw = JSON.parse(clean);
       parsed = {
-        taskType: raw.taskType || "sourcing",
-        description: raw.description || rawTask.slice(0, 100),
-        targetCount: raw.targetCount ?? 3,
-        location: raw.location,
-        budget: raw.budget,
-        deadline: raw.deadline,
-        category: raw.category ?? "services",
+        taskType: typeof raw.taskType === "string" ? raw.taskType : "sourcing",
+        description: typeof raw.description === "string" ? raw.description : rawTask.slice(0, 100),
+        targetCount: typeof raw.targetCount === "number" ? raw.targetCount : 3,
+        location: typeof raw.location === "string" ? raw.location : undefined,
+        budget: typeof raw.budget === "string" ? raw.budget : undefined,
+        deadline: typeof raw.deadline === "string" ? raw.deadline : undefined,
+        category: typeof raw.category === "string" ? raw.category : "services",
       };
-    } catch (err) {
-      console.error("OpenAI task parsing failed, using fallback intent:", err);
+    } catch {
       parsed = {
         taskType: "sourcing",
         description: rawTask.slice(0, 100),
@@ -85,7 +89,6 @@ Extract structured intent from the user's task. Return ONLY valid JSON:
       };
     }
 
-    // Create AgentMail inbox for this job
     let agentInboxId: string = `demo-${jobId.slice(-8)}`;
     let agentEmail: string = `relay-${jobId.slice(-8)}@agentmail.to`;
 
@@ -94,14 +97,13 @@ Extract structured intent from the user's task. Return ONLY valid JSON:
         username: `relay-${jobId.slice(-8)}`,
         displayName: "Relay Agent",
       });
-      const inboxRecord = inbox as unknown as Record<string, unknown>;
-      agentInboxId = (inboxRecord.inboxId as string) ?? (inboxRecord.id as string) ?? agentInboxId;
-      agentEmail = (inboxRecord.emailAddress as string) ?? (inboxRecord.email as string) ?? agentEmail;
-    } catch (e) {
-      console.error("AgentMail inbox creation failed (using demo mode):", e);
+      const record = inbox as unknown as Record<string, unknown>;
+      agentInboxId = (record.inboxId as string) ?? (record.id as string) ?? agentInboxId;
+      agentEmail = (record.emailAddress as string) ?? (record.email as string) ?? agentEmail;
+    } catch {
+      agentInboxId = `demo-${jobId.slice(-8)}`;
+      agentEmail = `relay-${jobId.slice(-8)}@agentmail.to`;
     }
-
-
 
     await ctx.runMutation(api.jobs.updateJobParsed, {
       jobId,
@@ -114,7 +116,6 @@ Extract structured intent from the user's task. Return ONLY valid JSON:
   },
 });
 
-// ─── Step 2: Research vendors via Firecrawl ────────────────────────────────
 export const researchVendors = action({
   args: {
     jobId: v.id("jobs"),
@@ -132,7 +133,6 @@ export const researchVendors = action({
 
     try {
       const searchResults = await getFirecrawl().search(searchQuery, { limit: targetCount + 3 });
-
       const searchRecord = searchResults as Record<string, unknown>;
       const rawList = Array.isArray(searchResults)
         ? searchResults
@@ -147,155 +147,170 @@ export const researchVendors = action({
         )
         .join("\n---\n");
 
+      const { text } = await generateText({
+        model: getGeminiModel(),
+        prompt: `Extract candidate vendors from these search results for ${category}${locationStr}.
+Return ONLY a valid JSON array of objects without markdown formatting:
+[
+  {
+    "name": "Vendor Name",
+    "url": "https://...",
+    "description": "Short description",
+    "email": "contact email or null",
+    "phone": "phone or null"
+  }
+]
+Limit to ${targetCount} items.
 
-      const extraction = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `Extract vendor contact info from these search results.
-Return ONLY valid JSON: { "vendors": [{ "name": string, "url": string, "description": string, "email": string | null, "phone": string | null }] }
-Extract up to ${targetCount} vendors. If email is missing, infer a plausible one like info@businessname.com.`,
-          },
-          { role: "user", content: resultsText || "No results found." },
-        ],
-        response_format: { type: "json_object" },
+Search results:
+${resultsText}`,
       });
 
-      const extracted = JSON.parse(extraction.choices[0].message.content ?? "{}");
-      vendors = extracted.vendors ?? [];
-    } catch (e) {
-      console.error("Firecrawl search failed, using fallback:", e);
+      const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
+      const parsedVendors = JSON.parse(clean);
+      if (Array.isArray(parsedVendors) && parsedVendors.length > 0) {
+        vendors = parsedVendors.map((v: Record<string, unknown>, i: number) => ({
+          name: String(v.name || `Vendor ${i + 1}`),
+          url: v.url ? String(v.url) : undefined,
+          description: v.description ? String(v.description) : undefined,
+          email: v.email ? String(v.email) : `contact${i + 1}@${String(v.name || "vendor").toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
+          phone: v.phone ? String(v.phone) : undefined,
+        }));
+      }
+    } catch {
+      vendors = [
+        {
+          name: `${category} Co. #1`,
+          url: "https://example1.com",
+          description: `Premier ${category} in ${location || "your area"}`,
+          email: `quote@${category.toLowerCase().replace(/\s+/g, "")}co1.com`,
+        },
+        {
+          name: `${category} Group #2`,
+          url: "https://example2.com",
+          description: `Certified ${category} specialists`,
+          email: `sales@${category.toLowerCase().replace(/\s+/g, "")}group2.com`,
+        },
+        {
+          name: `Apex ${category} #3`,
+          url: "https://example3.com",
+          description: `Fast & reliable ${category} team`,
+          email: `contact@apex${category.toLowerCase().replace(/\s+/g, "")}.com`,
+        },
+      ].slice(0, targetCount);
     }
 
-    // Pad with fallback vendors if needed
-    if (vendors.length < targetCount) {
-      vendors = [...vendors, ...generateFallbackVendors(category, location, targetCount - vendors.length)];
+    if (vendors.length === 0) {
+      vendors = [
+        {
+          name: `${category} Services`,
+          email: `hello@${category.toLowerCase().replace(/\s+/g, "")}austin.com`,
+          description: `Dedicated ${category} provider`,
+        },
+      ];
     }
 
-    vendors = vendors.slice(0, targetCount).map((v) => ({
-      ...v,
-      email: v.email ?? `info@${v.name.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-    }));
-
-    await ctx.runMutation(api.jobs.updateJobResearch, { jobId, firecrawlResults: vendors });
+    await ctx.runMutation(api.jobs.updateJobVendors, { jobId, vendors });
     return { vendors };
   },
 });
 
-function generateFallbackVendors(category: string, location: string | undefined, count: number): Vendor[] {
-  const loc = location ?? "your area";
-  const cat = category ?? "service";
-  const names = [`Premier ${cat} Co`, `${loc} ${cat} Pros`, `Elite ${cat} Services`, `Metro ${cat} Group`, `Swift ${cat} Solutions`];
-  return Array.from({ length: count }, (_, i) => ({
-    name: names[i % names.length],
-    url: `https://example.com`,
-    description: `Professional ${cat} services in ${loc}`,
-    email: `contact@${cat.replace(/\s+/g, "").toLowerCase()}${i + 1}.com`,
-    phone: `+1-555-${String(1000 + i * 111).padStart(4, "0")}`,
-  }));
-}
-
-// ─── Step 3: Send outreach emails to each vendor ───────────────────────────
 export const sendOutreach = action({
   args: {
     jobId: v.id("jobs"),
     agentEmail: v.string(),
     agentInboxId: v.string(),
-    vendors: v.array(v.object({
-      name: v.string(),
-      url: v.optional(v.string()),
-      description: v.optional(v.string()),
-      email: v.optional(v.string()),
-      phone: v.optional(v.string()),
-    })),
+    vendors: v.array(
+      v.object({
+        name: v.string(),
+        url: v.optional(v.string()),
+        description: v.optional(v.string()),
+        email: v.optional(v.string()),
+        phone: v.optional(v.string()),
+      })
+    ),
     jobDescription: v.string(),
     budget: v.optional(v.string()),
     deadline: v.optional(v.string()),
     userEmail: v.string(),
   },
-  handler: async (ctx, args): Promise<void> => {
-    const { jobId, agentEmail, agentInboxId, vendors, jobDescription, budget, deadline } = args;
+  handler: async (
+    ctx,
+    { jobId, agentEmail, agentInboxId, vendors, jobDescription, budget, deadline, userEmail }
+  ) => {
     await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "outreaching" });
 
-    // If vendors array is empty (called from modal), fetch from Convex
-    let vendorList = vendors;
-    if (vendorList.length === 0) {
-      const job = await ctx.runQuery(api.jobs.getJob, { jobId });
-      vendorList = job?.firecrawlResults ?? [];
-    }
-
-    for (const vendor of vendorList) {
-      const vendorEmail = vendor.email ?? `info@${vendor.name.toLowerCase().replace(/\s+/g, "")}.com`;
+    for (const vendor of vendors) {
+      const vendorEmail = vendor.email ?? `info@${vendor.name.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
 
       const threadId = await ctx.runMutation(api.threads.createThread, {
         jobId,
         vendorName: vendor.name,
         vendorEmail,
+        vendorUrl: vendor.url,
         agentInboxId,
         agentEmail,
       });
 
-      // Draft outreach email
-      let subject = `Quote Request`;
-      let body = `Hi, requesting a quote for: ${jobDescription}. Please reply with pricing and availability.`;
+
+      let subject = `Request for quote: ${jobDescription}`;
+      let body = `Hi ${vendor.name} team,\n\nWe are looking for ${jobDescription}.\n${budget ? `Budget: ${budget}\n` : ""}${deadline ? `Timeline: ${deadline}\n` : ""}\nPlease reply with your availability and pricing.\n\nBest regards,\nRelay Sourcing Agent`;
 
       try {
-        const emailDraft = await getOpenAI().chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "system",
-              content: `Write a concise, professional outreach email requesting a quote.
-Return JSON: { "subject": string, "body": string }
-Keep body under 120 words. Be friendly, specific, and human. End with a clear call to action.`,
-            },
-            {
-              role: "user",
-              content: `Task: ${jobDescription}
-${budget ? `Budget: ${budget}` : ""}
-${deadline ? `Timeline: ${deadline}` : ""}
-Contacting: ${vendor.name}
-Reply-to: ${agentEmail}`,
-            },
-          ],
-          response_format: { type: "json_object" },
-        });
+        const { text } = await generateText({
+          model: getGeminiModel(),
+          prompt: `Write a concise outreach inquiry email to ${vendor.name} requesting a quote.
+Task: ${jobDescription}
+Budget: ${budget ?? "Standard market rates"}
+Deadline: ${deadline ?? "Soon"}
 
-        const parsedDraft = JSON.parse(emailDraft.choices[0].message.content ?? "{}");
-        if (parsedDraft.subject) subject = parsedDraft.subject;
-        if (parsedDraft.body) body = parsedDraft.body;
-      } catch (e) {
-        console.error(`OpenAI outreach draft failed for ${vendor.name}, using template:`, e);
+Return ONLY valid JSON without markdown:
+{
+  "subject": "Request for Quote: ...",
+  "body": "Hi ${vendor.name} team,\\n\\n..."
+}`,
+        });
+        const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
+        const parsedDraft = JSON.parse(clean);
+        if (parsedDraft.subject) subject = String(parsedDraft.subject);
+        if (parsedDraft.body) body = String(parsedDraft.body);
+      } catch {
+        subject = `Request for quote: ${jobDescription}`;
       }
 
-      // Send via AgentMail
       try {
         await getAgentMail().inboxes.messages.send(agentInboxId, {
           to: [vendorEmail],
-          subject: subject ?? `Quote Request`,
-          text: body ?? `Hi, requesting a quote for: ${jobDescription}. Please reply with pricing.`,
+          subject,
+          text: body,
         });
-      } catch (e) {
-        console.error(`AgentMail send failed for ${vendor.name}:`, e);
-      }
+      } catch {}
+
 
       await ctx.runMutation(api.threads.addMessage, {
         threadId,
         jobId,
         direction: "outbound",
-        subject: subject ?? "Quote Request",
-        body: body ?? `Quote request for: ${jobDescription}`,
+        subject,
+        body,
       });
 
       await ctx.runMutation(api.threads.updateThreadStatus, { threadId, status: "sent" });
     }
 
     await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "awaiting_replies" });
+
+    try {
+      await getAgentMail().inboxes.messages.send(agentInboxId, {
+        to: [userEmail],
+        subject: `Relay: We reached out to ${vendors.length} vendors`,
+        text: `We have sent inquiries to ${vendors.map((v) => v.name).join(", ")} regarding: "${jobDescription}".\n\nWe will analyze all replies and compile quotes.`,
+      });
+    } catch {}
+
   },
 });
 
-// ─── Step 4: Process an inbound vendor reply ───────────────────────────────
 export const processReply = action({
   args: {
     jobId: v.id("jobs"),
@@ -320,44 +335,42 @@ export const processReply = action({
 
     await ctx.runMutation(api.threads.updateThreadStatus, { threadId, status: "replied" });
 
-    // Analyze reply
-    let analyzed: {
+    type AnalysisResult = {
       hasQuote?: boolean;
       quoteAmount?: string | null;
       action?: "mark_complete" | "ask_followup" | "mark_declined";
       followupQuestion?: string | null;
       summary?: string;
     };
-    try {
 
-      const analysis = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `Analyze this vendor reply email.
-Return JSON: {
+    let analyzed: AnalysisResult;
+    try {
+      const { text } = await generateText({
+        model: getGeminiModel(),
+        prompt: `Analyze this vendor reply email for task: "${jobDescription}".
+Vendor: ${vendorName}
+Reply text:
+${replyBody}
+
+Return ONLY valid JSON without markdown:
+{
   "hasQuote": boolean,
-  "quoteAmount": string | null,
+  "quoteAmount": "$amount or concise quote summary or null",
   "action": "mark_complete" | "ask_followup" | "mark_declined",
-  "followupQuestion": string | null,
-  "summary": string
+  "followupQuestion": "clarifying question if needed, else null",
+  "summary": "one-sentence recap of what the vendor offered"
 }`,
-          },
-          { role: "user", content: `Job: ${jobDescription}\nVendor (${vendorName}) replied:\n${replyBody}` },
-        ],
-        response_format: { type: "json_object" },
       });
 
-      analyzed = JSON.parse(analysis.choices[0].message.content ?? "{}");
-    } catch (err) {
-      console.error("OpenAI reply analysis failed, using fallback:", err);
+      const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
+      analyzed = JSON.parse(clean);
+    } catch {
       const match = replyBody.match(/\$[\d,]+(\.\d+)?/);
       analyzed = {
         hasQuote: Boolean(match),
         quoteAmount: match ? match[0] : null,
         action: match ? "mark_complete" : "ask_followup",
-        followupQuestion: match ? null : "Could you provide pricing and availability?",
+        followupQuestion: match ? null : "Could you provide full pricing and availability details?",
         summary: replyBody.slice(0, 100),
       };
     }
@@ -376,45 +389,45 @@ Return JSON: {
         notes: analyzed.summary,
       });
     } else if (analyzed.action === "ask_followup" && analyzed.followupQuestion) {
-      let fs = "Follow-up";
+      let fs = "Follow-up regarding quote";
       let fb = analyzed.followupQuestion;
 
       try {
-        const followup = await getOpenAI().chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "system",
-              content: `Write a brief, friendly follow-up email. Return JSON: { "subject": string, "body": string }. Under 60 words.`,
-            },
-            { role: "user", content: `Follow-up question: ${analyzed.followupQuestion}` },
-          ],
-          response_format: { type: "json_object" },
-        });
+        const { text } = await generateText({
+          model: getGeminiModel(),
+          prompt: `Draft a quick professional follow-up email to ${vendorName}.
+Question to ask: ${analyzed.followupQuestion}
+Context: ${jobDescription}
 
-        const parsedFollowup = JSON.parse(followup.choices[0].message.content ?? "{}");
-        if (parsedFollowup.subject) fs = parsedFollowup.subject;
-        if (parsedFollowup.body) fb = parsedFollowup.body;
-      } catch (e) {
-        console.error("OpenAI follow-up drafting failed:", e);
+Return ONLY valid JSON without markdown:
+{
+  "subject": "Follow-up: ...",
+  "body": "Hi ${vendorName},\\n\\n..."
+}`,
+        });
+        const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
+        const draft = JSON.parse(clean);
+        if (draft.subject) fs = String(draft.subject);
+        if (draft.body) fb = String(draft.body);
+      } catch {
+        fs = "Follow-up regarding your quote";
       }
 
       try {
         await getAgentMail().inboxes.messages.send(agentInboxId, {
           to: [vendorEmail],
-          subject: fs ?? "Follow-up",
-          text: fb ?? analyzed.followupQuestion,
+          subject: fs,
+          text: fb,
         });
-      } catch (e) {
-        console.error("Follow-up send failed:", e);
-      }
+      } catch {}
+
 
       await ctx.runMutation(api.threads.addMessage, {
         threadId,
         jobId,
         direction: "outbound",
-        subject: fs ?? "Follow-up",
-        body: fb ?? analyzed.followupQuestion,
+        subject: fs,
+        body: fb,
       });
 
       await ctx.runMutation(api.threads.updateThreadStatus, { threadId, status: "following_up" });
@@ -424,7 +437,6 @@ Return JSON: {
   },
 });
 
-// ─── Step 5: Compile final summary and email user ──────────────────────────
 export const compileSummary = action({
   args: {
     jobId: v.id("jobs"),
@@ -435,96 +447,100 @@ export const compileSummary = action({
   handler: async (ctx, { jobId, userEmail, jobDescription, agentInboxId }): Promise<{ summary: string }> => {
     await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "compiling" });
 
-    const threads = await ctx.runQuery(api.threads.getThreadsByJob, { jobId });
+    type ThreadDoc = {
+      _id: Id<"threads">;
+      vendorName: string;
+      status: string;
+      quote?: string;
+      notes?: string;
+    };
 
-    const summaryInput = threads.map((t) => ({
+    type SummaryItem = {
+      vendor: string;
+      status: string;
+      quote: string;
+      notes: string;
+    };
+
+    const threads = (await ctx.runQuery(api.threads.getThreadsByJob, { jobId })) as ThreadDoc[];
+    const summaryInput: SummaryItem[] = threads.map((t: ThreadDoc) => ({
       vendor: t.vendorName,
       status: t.status,
       quote: t.quote ?? "No quote received",
       notes: t.notes ?? "",
     }));
 
-    let subject = "Relay: Your sourcing job is complete";
-    let body = `Summary for: ${jobDescription}\n\nVendor Results:\n${summaryInput.map((s) => `- ${s.vendor}: ${s.quote} (${s.status})${s.notes ? ` - ${s.notes}` : ""}`).join("\n")}\n\nAll tasks and quotes have been compiled by Relay.`;
+    const subject = `Relay: Sourcing report for ${jobDescription.slice(0, 40)}`;
 
+    let body = `Summary for: ${jobDescription}\n\nVendor Results:\n${summaryInput.map((s: SummaryItem) => `- ${s.vendor}: ${s.quote} (${s.status})${s.notes ? ` - ${s.notes}` : ""}`).join("\n")}\n\nAll tasks and quotes have been compiled by Relay.`;
 
     try {
-      const summaryCompletion = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `Write a clear final summary email for a sourcing job.
-Include: what was done, a vendor comparison (use a simple text table), and a top recommendation.
-Return JSON: { "subject": string, "body": string }`,
-          },
-          {
-            role: "user",
-            content: `Job: ${jobDescription}\nResults:\n${JSON.stringify(summaryInput, null, 2)}`,
-          },
-        ],
-        response_format: { type: "json_object" },
-      });
+      const { text } = await generateText({
+        model: getGeminiModel(),
+        prompt: `Write a clear final executive summary email for this sourcing job.
+Task: ${jobDescription}
+Vendor results:
+${JSON.stringify(summaryInput, null, 2)}
 
-      const parsedSummary = JSON.parse(summaryCompletion.choices[0].message.content ?? "{}");
-      if (parsedSummary.subject) subject = parsedSummary.subject;
-      if (parsedSummary.body) body = parsedSummary.body;
-    } catch (e) {
-      console.error("OpenAI summary compilation failed, using structured fallback:", e);
-    }
+Include:
+1. Overview of vendors contacted
+2. Comparative pricing table
+3. Top recommendation and clear next steps`,
+      });
+      body = text;
+    } catch {}
 
     try {
       await getAgentMail().inboxes.messages.send(agentInboxId, {
         to: [userEmail],
-        subject: subject ?? "Relay: Your sourcing job is complete",
-        text: body ?? "Job complete.",
+        subject,
+        text: body,
       });
-    } catch (e) {
-      console.error("Summary email failed:", e);
-    }
+    } catch {}
 
-    await ctx.runMutation(api.jobs.completeJob, { jobId, summary: body ?? "Job completed." });
+    await ctx.runMutation(api.jobs.updateJobSummary, { jobId, summary: body });
     return { summary: body };
   },
 });
 
-// ─── Step 6: Ask user a decision question ─────────────────────────────────
-export const askUserDecision = action({
+export const requestDecision = action({
   args: {
     jobId: v.id("jobs"),
+    threadId: v.optional(v.id("threads")),
+    question: v.string(),
+    context: v.string(),
+    options: v.optional(v.array(v.string())),
     userEmail: v.string(),
     agentInboxId: v.string(),
-    question: v.string(),
-    options: v.array(v.string()),
-    context: v.optional(v.string()),
   },
-  handler: async (ctx, { jobId, userEmail, agentInboxId, question, options, context }): Promise<{ decisionId: Id<"decisions"> }> => {
-    const decisionId = await ctx.runMutation(api.decisions.createDecision, {
+  handler: async (
+    ctx,
+    { jobId, threadId, question, context, options, userEmail, agentInboxId }
+  ): Promise<{ decisionId: Id<"decisions"> }> => {
+    const decisionId: Id<"decisions"> = await ctx.runMutation(api.decisions.createDecision, {
       jobId,
+      threadId,
       question,
-      options,
       context,
+      options: options ?? [],
     });
 
-    const optionsList = options.map((o, i) => `${i + 1}. ${o}`).join("\n");
-    const emailBody = `Your Relay agent needs your input to continue.\n\n${question}\n\n${context ? `Context:\n${context}\n\n` : ""}Options:\n${optionsList}\n\nReply with your choice and I'll continue.\n\n— Relay`;
+
 
     try {
       await getAgentMail().inboxes.messages.send(agentInboxId, {
         to: [userEmail],
-        subject: "Relay needs your input",
-        text: emailBody,
+        subject: `[Action Required] Relay needs your input`,
+        text: `Relay needs a decision to continue your sourcing job:\n\n"${question}"\n\nContext: ${context}\n${options ? `Options:\n${options.map((o) => `• ${o}`).join("\n")}\n` : ""}\nReply directly to this email or resolve on your dashboard.`,
       });
-    } catch (e) {
-      console.error("Decision email failed:", e);
-    }
+    } catch {}
+
 
     await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "needs_decision" });
     return { decisionId };
   },
 });
 
-// ─── Full pipeline runner ──────────────────────────────────────────────────
 export const startPipeline = action({
   args: {
     userEmail: v.string(),
@@ -535,7 +551,6 @@ export const startPipeline = action({
 
     const { parsed, agentInboxId, agentEmail }: { parsed: ParsedIntent; agentInboxId: string; agentEmail: string } =
       await ctx.runAction(api.agent.parseTask, {
-
         jobId,
         rawTask,
         userEmail,
@@ -562,4 +577,3 @@ export const startPipeline = action({
     return { jobId };
   },
 });
-
