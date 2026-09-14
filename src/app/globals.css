@@ -1,38 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
 @import "tailwindcss";
 
+
 :root {
-  --font-inter: 'Inter', sans-serif;
-  --ink: #0f0f0f;
-  --ink-secondary: #5a5a5a;
-  --ink-muted: #9a9a9a;
-  --surface: #fafaf8;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'Geist Mono', monospace;
+  --ink: #0a0a0a;
+  --ink-secondary: #525252;
+  --ink-muted: #8a8a8a;
+  --surface: #ffffff;
+  --surface-subtle: #fafafa;
   --surface-raised: #ffffff;
-  --border: #e5e5e0;
-  --border-strong: #c8c8c0;
-  --accent: #2563eb;
-  --accent-soft: #eff6ff;
-  --accent-border: #bfdbfe;
-  --green: #16a34a;
-  --green-soft: #f0fdf4;
-  --amber: #d97706;
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --emerald: #10b981;
+  --emerald-soft: #ecfdf5;
+  --emerald-border: #a7f3d0;
+  --amber: #f59e0b;
   --amber-soft: #fffbeb;
-  --red: #dc2626;
+  --amber-border: #fde68a;
+  --red: #ef4444;
   --red-soft: #fef2f2;
-  --purple: #7c3aed;
+  --blue: #3b82f6;
+  --blue-soft: #eff6ff;
+  --purple: #8b5cf6;
   --purple-soft: #f5f3ff;
 }
 
-* { box-sizing: border-box; }
-
-body {
-  font-family: var(--font-inter);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.6;
-  margin: 0;
+* {
+  box-sizing: border-box;
 }
 
-::selection { background: var(--accent-soft); color: var(--accent); }
+body {
+  font-family: var(--font-mono);
+  background: var(--surface-subtle);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
 
-.font-mono { font-family: var(--font-mono), monospace; }
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: #000;
+  color: #fff;
+}

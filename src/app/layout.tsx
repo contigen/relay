@@ -1,29 +1,20 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { ConvexClientProvider } from "./ConvexClientProvider";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  weight: ["300", "400", "500", "600"],
-});
-
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  weight: ["400", "500"],
-});
+import { ConvexClientProvider } from "./convex-client-provider";
 
 export const metadata: Metadata = {
-  title: "Relay — Email-native AI agent",
-  description: "Delegate sourcing tasks via email. Relay researches, contacts vendors, and reports back.",
+  title: "RELAY — Autonomous Sourcing Agent",
+  description: "Email-native autonomous AI sourcing agent with real-time verification and multi-vendor coordination.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+type RootLayoutProps = {
+  children: React.ReactNode;
+};
+
+export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
-      <body className="antialiased">
+    <html lang="en">
+      <body className="antialiased min-h-screen bg-[#fafafa] text-[#0a0a0a]">
         <ConvexClientProvider>{children}</ConvexClientProvider>
       </body>
     </html>
