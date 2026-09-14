@@ -10,9 +10,9 @@
 - **Components:** @firecrawl/firecrawl-convex, @agentmail/convex, @convex-dev/static-hosting
 - **Convex features:** schema, tables, indexes, queries, mutations, actions, HTTP actions, realtime queries
 - **Auth:** none
-- **AI models:** gpt-4o
+- **AI models:** gemini-3.6-flash
 - **Started:** 2026-08-25T12:00:00Z
-- **Last updated:** 2026-09-14T19:33:00Z
+- **Last updated:** 2026-09-14T20:23:00Z
 
 ## Log
 
@@ -20,13 +20,17 @@
 Initialized Next.js application shell with App Router, TypeScript, and styling primitives.
 
 ### 2026-09-14 - 1314cec
-
 Built the core Relay autonomous sourcing engine and real-time dashboard:
 - Defined Convex schema with four core tables (`jobs`, `threads`, `messages`, `decisions`) and status indexes (`convex/schema.ts`).
-- Implemented the autonomous agent pipeline in Convex actions (`convex/agent.ts`): structured intent parsing with OpenAI GPT-4o, web vendor discovery via Firecrawl, multi-vendor email outreach via AgentMail, inbound reply analysis, and user decision escalation.
 - Mounted official `@firecrawl/firecrawl-convex`, `@agentmail/convex`, and `@convex-dev/static-hosting` components in `convex/convex.config.ts`.
 - Added HTTP webhook handlers (`convex/http.ts`) for inbound AgentMail vendor replies and email-driven job intake alongside static route registration.
-- Created real-time reactive dashboard with live job status progression, vendor thread inspection, inline decision banners, and demo reply simulator (`src/app/page.tsx`, `src/app/components/`).
-- Deployed frontend to Convex static hosting at `https://energetic-koala-352.convex.site`.
-- Verified zero-error TypeScript build (`tsc --noEmit`), zero-warning ESLint (`eslint`), and live cloud execution.
+- Created real-time reactive dashboard with live job status progression, vendor thread inspection, inline decision banners, and demo reply simulator.
+
+### 2026-09-14 - ed97c65
+Upgraded autonomous AI engine and redesigned user experience:
+- Migrated from OpenAI SDK to Vercel AI SDK (`@ai-sdk/google`) using Google Gemini 3.6 Flash (`gemini-3.6-flash`) with live cloud execution verified on Convex.
+- Redesigned interface adapting PaydayAgent luxury editorial aesthetic with Instrument Serif headlines and Geist Mono technical typography.
+- Refactored all component architecture to kebab-case file names (`dashboard-view.tsx`, `job-card.tsx`, `thread-row.tsx`, `terminal-box.tsx`, `decision-banner.tsx`, `setup-view.tsx`).
+- Enforced strict TypeScript discipline: types over interfaces, zero `any`, zero code comments, Server Component parent page pattern, and zero-error builds.
+
 
