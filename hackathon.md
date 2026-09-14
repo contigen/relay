@@ -33,4 +33,10 @@ Upgraded autonomous AI engine and redesigned user experience:
 - Refactored all component architecture to kebab-case file names (`dashboard-view.tsx`, `job-card.tsx`, `thread-row.tsx`, `terminal-box.tsx`, `decision-banner.tsx`, `setup-view.tsx`).
 - Enforced strict TypeScript discipline: types over interfaces, zero `any`, zero code comments, Server Component parent page pattern, and zero-error builds.
 
-
+### 2026-09-14 - f149274
+Hardened pipeline for production end-users by eliminating all mocks and fallbacks:
+- Removed synthetic fallback vendors (`${category} Co. #1`, `example1.com`) from `convex/agent.ts`; discovery now strictly queries Firecrawl web results and uses Gemini 3.6 Flash to extract genuine businesses.
+- Fixed Firecrawl v2 result parser to consume `searchResults.web` directly, verified live against Austin office cleaning providers.
+- Integrated real AgentMail account inbox resolution (`inboxes.list()`) replacing hardcoded `demo-` inbox IDs.
+- Eliminated the in-app interactive simulation panel and mock reply dispatcher from `src/app/components/thread-row.tsx` and `dashboard-view.tsx`; inbound replies are now strictly received through real AgentMail webhooks.
+- Simplified setup wizard specification flow to feed unadulterated user requirements directly into Gemini's intent parser.
