@@ -10,14 +10,10 @@ type SetupViewProps = {
 
 type PlanPreview = {
   task: string;
-  category: string;
-  location: string;
-  budget: string;
-  targetCount: number;
 };
 
 export default function SetupView({ onPlanCreated }: SetupViewProps) {
-  const [email, setEmail] = useState("user@company.com");
+  const [email, setEmail] = useState("");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState<PlanPreview | null>(null);
@@ -26,13 +22,7 @@ export default function SetupView({ onPlanCreated }: SetupViewProps) {
 
   const handleCreatePreview = (text: string) => {
     setInput(text);
-    setPlan({
-      task: text,
-      category: text.includes("clean") ? "Cleaning Services" : text.includes("cater") ? "Catering" : "Professional Services",
-      location: text.includes("Austin") ? "Austin, TX" : text.includes("NYC") ? "New York, NY" : "Target Region",
-      budget: text.includes("$") ? text.match(/\$[\d,]+(\/mo|\/month)?/)?.[0] || "$500 - $1,200" : "Market Rate",
-      targetCount: 3,
-    });
+    setPlan({ task: text });
   };
 
   const handleDispatch = async () => {
@@ -130,41 +120,31 @@ export default function SetupView({ onPlanCreated }: SetupViewProps) {
             {plan && (
               <div className="border border-[#e5e5e5] p-5 bg-[#fafafa] max-w-lg mt-4 space-y-3">
                 <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#16a34a] uppercase tracking-wider">
-                  <span>✓</span> PLAN SYNTHESIZED
+                  <span>✓</span> SPECIFICATION READY
                 </div>
-                <div className="space-y-1.5 text-xs text-[#525252] border-t border-[#e5e5e5] pt-2.5">
-                  <div className="flex justify-between">
-                    <span className="text-[#8a8a8a]">Service:</span>
-                    <span className="text-[#0a0a0a] font-medium">{plan.category}</span>
+                <div className="space-y-2 text-xs text-[#525252] border-t border-[#e5e5e5] pt-2.5">
+                  <div>
+                    <span className="text-[#8a8a8a] block text-[10px] uppercase">Task Requirements:</span>
+                    <p className="text-[#0a0a0a] font-mono mt-0.5 leading-relaxed">{plan.task}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#8a8a8a]">Region:</span>
-                    <span className="text-[#0a0a0a]">{plan.location}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#8a8a8a]">Budget:</span>
-                    <span className="text-[#0a0a0a]">{plan.budget}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#8a8a8a]">Target Vendors:</span>
-                    <span className="text-[#0a0a0a]">{plan.targetCount} verified providers</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#8a8a8a]">Client Inbox:</span>
+                  <div className="flex items-center justify-between pt-2 border-t border-[#f0f0f0]">
+                    <span className="text-[#8a8a8a]">Your Notification Email:</span>
                     <input
                       type="email"
+                      required
+                      placeholder="you@company.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="text-right border-b border-[#a3a3a3] bg-transparent outline-none text-[#0a0a0a]"
+                      className="text-right border-b border-[#a3a3a3] bg-transparent outline-none text-[#0a0a0a] px-1 py-0.5 font-mono text-xs w-52"
                     />
                   </div>
                 </div>
                 <button
                   onClick={handleDispatch}
-                  disabled={loading}
-                  className="w-full mt-3 bg-[#0a0a0a] hover:bg-[#262626] text-white font-mono text-xs uppercase tracking-wider py-2.5 disabled:opacity-50"
+                  disabled={loading || !email.trim()}
+                  className="w-full mt-3 bg-[#0a0a0a] hover:bg-[#262626] text-white font-mono text-xs uppercase tracking-wider py-2.5 disabled:opacity-50 transition-colors"
                 >
-                  {loading ? "DISPATCHING AGENT PIPELINE…" : "OPEN DASHBOARD & RUN →"}
+                  {loading ? "DISPATCHING AGENT PIPELINE…" : "LAUNCH SOURCING PIPELINE →"}
                 </button>
               </div>
             )}

@@ -89,20 +89,25 @@ Task: "${rawTask}"`,
       };
     }
 
-    let agentInboxId: string = `demo-${jobId.slice(-8)}`;
-    let agentEmail: string = `relay-${jobId.slice(-8)}@agentmail.to`;
+    let agentInboxId = "";
+    let agentEmail = "";
 
     try {
-      const inbox = await getAgentMail().inboxes.create({
-        username: `relay-${jobId.slice(-8)}`,
-        displayName: "Relay Agent",
-      });
-      const record = inbox as unknown as Record<string, unknown>;
-      agentInboxId = (record.inboxId as string) ?? (record.id as string) ?? agentInboxId;
-      agentEmail = (record.emailAddress as string) ?? (record.email as string) ?? agentEmail;
-    } catch {
-      agentInboxId = `demo-${jobId.slice(-8)}`;
-      agentEmail = `relay-${jobId.slice(-8)}@agentmail.to`;
+      const inboxesList = await getAgentMail().inboxes.list();
+      const firstInbox = inboxesList.inboxes?.[0];
+      if (firstInbox) {
+        agentInboxId = firstInbox.inboxId;
+        agentEmail = firstInbox.email;
+      } else {
+        const inbox = await getAgentMail().inboxes.create({
+          displayName: "Relay Agent",
+        });
+        agentInboxId = inbox.inboxId;
+        agentEmail = inbox.email;
+      }
+    } catch (err) {
+      console.error("AGENTMAIL_INIT_ERROR:", err);
+      throw new Error(`Failed to initialize AgentMail inbox: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     await ctx.runMutation(api.jobs.updateJobParsed, {
@@ -132,24 +137,29 @@ export const researchVendors = action({
     let vendors: Vendor[] = [];
 
     try {
-      const searchResults = await getFirecrawl().search(searchQuery, { limit: targetCount + 3 });
+      const searchResults = await getFirecrawl().search(searchQuery, { limit: targetCount + 5 });
       const searchRecord = searchResults as Record<string, unknown>;
-      const rawList = Array.isArray(searchResults)
-        ? searchResults
-        : Array.isArray(searchRecord.data)
-          ? (searchRecord.data as Array<Record<string, unknown>>)
-          : [];
+      const rawList: Array<Record<string, unknown>> = Array.isArray(searchRecord.web)
+        ? (searchRecord.web as Array<Record<string, unknown>>)
+        : Array.isArray(searchResults)
+          ? searchResults
+          : Array.isArray(searchRecord.data)
+            ? (searchRecord.data as Array<Record<string, unknown>>)
+            : [];
 
       const resultsText = rawList
-        .slice(0, 6)
+        .slice(0, 8)
         .map((r: Record<string, unknown>) =>
           `URL: ${r.url ?? ""}\nTitle: ${r.title ?? ""}\nDescription: ${r.description ?? ""}\nContent: ${String(r.markdown ?? r.content ?? "").slice(0, 400)}`
         )
         .join("\n---\n");
 
-      const { text } = await generateText({
-        model: getGeminiModel(),
-        prompt: `Extract candidate vendors from these search results for ${category}${locationStr}.
+      if (resultsText.trim().length > 0) {
+        const { text } = await generateText({
+          model: getGeminiModel(),
+          prompt: `Extract candidate real vendors from these web search results for ${category}${locationStr}.
+Extract only genuine businesses matching the service request.
+For the email, extract the actual email if visible, or derive the official contact address from their verified website domain (e.g. contact@domain.com or info@domain.com only if the domain is present in their URL). Do not fabricate non-existent companies.
 Return ONLY a valid JSON array of objects without markdown formatting:
 [
   {
@@ -160,54 +170,44 @@ Return ONLY a valid JSON array of objects without markdown formatting:
     "phone": "phone or null"
   }
 ]
-Limit to ${targetCount} items.
+Limit to at most ${targetCount} items.
 
 Search results:
 ${resultsText}`,
-      });
+        });
 
-      const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
-      const parsedVendors = JSON.parse(clean);
-      if (Array.isArray(parsedVendors) && parsedVendors.length > 0) {
-        vendors = parsedVendors.map((v: Record<string, unknown>, i: number) => ({
-          name: String(v.name || `Vendor ${i + 1}`),
-          url: v.url ? String(v.url) : undefined,
-          description: v.description ? String(v.description) : undefined,
-          email: v.email ? String(v.email) : `contact${i + 1}@${String(v.name || "vendor").toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-          phone: v.phone ? String(v.phone) : undefined,
-        }));
+        const clean = text.replace(/^```json/i, "").replace(/^```/i, "").replace(/```$/i, "").trim();
+        const parsedVendors = JSON.parse(clean);
+        if (Array.isArray(parsedVendors) && parsedVendors.length > 0) {
+          vendors = parsedVendors
+            .filter((v: Record<string, unknown>) => v && typeof v.name === "string" && v.name.trim().length > 0)
+            .map((v: Record<string, unknown>) => {
+              let email = typeof v.email === "string" && v.email.includes("@") ? v.email.trim() : undefined;
+              if (!email && typeof v.url === "string") {
+                try {
+                  const host = new URL(v.url).hostname.replace(/^www\./, "");
+                  if (host && host.includes(".")) {
+                    email = `contact@${host}`;
+                  }
+                } catch {}
+              }
+              return {
+                name: String(v.name).trim(),
+                url: typeof v.url === "string" ? v.url.trim() : undefined,
+                description: typeof v.description === "string" ? v.description.trim() : undefined,
+                email,
+                phone: typeof v.phone === "string" ? v.phone.trim() : undefined,
+              };
+            });
+        }
       }
-    } catch {
-      vendors = [
-        {
-          name: `${category} Co. #1`,
-          url: "https://example1.com",
-          description: `Premier ${category} in ${location || "your area"}`,
-          email: `quote@${category.toLowerCase().replace(/\s+/g, "")}co1.com`,
-        },
-        {
-          name: `${category} Group #2`,
-          url: "https://example2.com",
-          description: `Certified ${category} specialists`,
-          email: `sales@${category.toLowerCase().replace(/\s+/g, "")}group2.com`,
-        },
-        {
-          name: `Apex ${category} #3`,
-          url: "https://example3.com",
-          description: `Fast & reliable ${category} team`,
-          email: `contact@apex${category.toLowerCase().replace(/\s+/g, "")}.com`,
-        },
-      ].slice(0, targetCount);
+    } catch (err) {
+      console.error("Firecrawl vendor research error:", err);
+      vendors = [];
     }
 
     if (vendors.length === 0) {
-      vendors = [
-        {
-          name: `${category} Services`,
-          email: `hello@${category.toLowerCase().replace(/\s+/g, "")}austin.com`,
-          description: `Dedicated ${category} provider`,
-        },
-      ];
+      await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "failed" });
     }
 
     await ctx.runMutation(api.jobs.updateJobVendors, { jobId, vendors });
@@ -238,10 +238,19 @@ export const sendOutreach = action({
     ctx,
     { jobId, agentEmail, agentInboxId, vendors, jobDescription, budget, deadline, userEmail }
   ) => {
+    if (!vendors || vendors.length === 0) {
+      await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "failed" });
+      return;
+    }
+
     await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "outreaching" });
 
+    let sentCount = 0;
     for (const vendor of vendors) {
-      const vendorEmail = vendor.email ?? `info@${vendor.name.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
+      const vendorEmail = vendor.email;
+      if (!vendorEmail || !vendorEmail.includes("@")) {
+        continue;
+      }
 
       const threadId = await ctx.runMutation(api.threads.createThread, {
         jobId,
@@ -296,6 +305,12 @@ Return ONLY valid JSON without markdown:
       });
 
       await ctx.runMutation(api.threads.updateThreadStatus, { threadId, status: "sent" });
+      sentCount++;
+    }
+
+    if (sentCount === 0) {
+      await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "failed" });
+      return;
     }
 
     await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "awaiting_replies" });
@@ -303,7 +318,7 @@ Return ONLY valid JSON without markdown:
     try {
       await getAgentMail().inboxes.messages.send(agentInboxId, {
         to: [userEmail],
-        subject: `Relay: We reached out to ${vendors.length} vendors`,
+        subject: `Relay: We reached out to ${sentCount} vendors`,
         text: `We have sent inquiries to ${vendors.map((v) => v.name).join(", ")} regarding: "${jobDescription}".\n\nWe will analyze all replies and compile quotes.`,
       });
     } catch {}
@@ -563,16 +578,22 @@ export const startPipeline = action({
       targetCount: parsed.targetCount ?? 3,
     });
 
-    await ctx.runAction(api.agent.sendOutreach, {
-      jobId,
-      agentEmail: agentEmail ?? `relay-${String(jobId).slice(-8)}@agentmail.to`,
-      agentInboxId: agentInboxId ?? `inbox-${String(jobId).slice(-8)}`,
-      vendors,
-      jobDescription: parsed.description ?? rawTask,
-      budget: parsed.budget,
-      deadline: parsed.deadline,
-      userEmail,
-    });
+    try {
+      await ctx.runAction(api.agent.sendOutreach, {
+        jobId,
+        agentEmail,
+        agentInboxId,
+        vendors,
+        jobDescription: parsed.description ?? rawTask,
+        budget: parsed.budget,
+        deadline: parsed.deadline,
+        userEmail,
+      });
+    } catch (err) {
+      console.error("sendOutreach failed:", err);
+      await ctx.runMutation(api.jobs.updateJobStatus, { jobId, status: "failed" });
+      throw err;
+    }
 
     return { jobId };
   },

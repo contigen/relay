@@ -88,7 +88,7 @@ export default function DashboardView({ initialTab = "dashboard" }: DashboardVie
   const handleResolve = async (reply: string) => {
     if (!pendingDecision || !activeJob) return;
     await resolveDecision({ decisionId: pendingDecision._id, userReply: reply });
-    const inboxId = activeJob.agentInboxId ?? `demo-${activeJob._id.slice(-8)}`;
+    const inboxId = activeJob.agentInboxId || "";
     await compileSummary({
       jobId: activeJob._id,
       userEmail: activeJob.userEmail,
@@ -99,7 +99,7 @@ export default function DashboardView({ initialTab = "dashboard" }: DashboardVie
 
   const handleTriggerCompile = async () => {
     if (!activeJob) return;
-    const inboxId = activeJob.agentInboxId ?? `demo-${activeJob._id.slice(-8)}`;
+    const inboxId = activeJob.agentInboxId || "";
     await compileSummary({
       jobId: activeJob._id,
       userEmail: activeJob.userEmail,
@@ -302,14 +302,13 @@ export default function DashboardView({ initialTab = "dashboard" }: DashboardVie
                       </button>
                       <button
                         onClick={() => {
-                          if (threads[0]) {
-                            const btn = document.querySelector(".bg-\\[\\#fffbeb\\] input") as HTMLInputElement;
-                            if (btn) btn.focus();
+                          if (activeJob?.agentEmail) {
+                            navigator.clipboard.writeText(activeJob.agentEmail);
                           }
                         }}
                         className="p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors"
                       >
-                        Simulate reply
+                        Copy agent email
                       </button>
                       <button
                         onClick={() => setActiveTab("setup")}

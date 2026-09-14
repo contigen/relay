@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useAction } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { useState } from "react";
@@ -32,8 +32,8 @@ type ThreadDoc = {
 type ThreadRowProps = {
   thread: ThreadDoc;
   jobDescription?: string;
-  agentInboxId: string;
-  agentEmail: string;
+  agentInboxId?: string;
+  agentEmail?: string;
 };
 
 const getBadgeStyle = (status: string) => {
@@ -55,38 +55,10 @@ const getBadgeStyle = (status: string) => {
 
 export default function ThreadRow({
   thread,
-  jobDescription = "Sourcing services",
-  agentInboxId,
-  agentEmail,
 }: ThreadRowProps) {
   const [open, setOpen] = useState(false);
-  const [simulatedReply, setSimulatedReply] = useState("");
-  const [simulating, setSimulating] = useState(false);
-
   const messages = (useQuery(api.threads.getMessagesByThread, { threadId: thread._id }) ?? []) as MessageDoc[];
-  const processReply = useAction(api.agent.processReply);
   const badge = getBadgeStyle(thread.status);
-
-  const handleSimulate = async () => {
-    if (!simulatedReply.trim() || simulating) return;
-    setSimulating(true);
-
-    try {
-      await processReply({
-        jobId: thread.jobId,
-        threadId: thread._id,
-        replyBody: simulatedReply,
-        vendorName: thread.vendorName,
-        agentInboxId: agentInboxId || thread.agentInboxId,
-        agentEmail: agentEmail || thread.agentEmail,
-        vendorEmail: thread.vendorEmail,
-        jobDescription,
-      });
-      setSimulatedReply("");
-    } finally {
-      setSimulating(false);
-    }
-  };
 
   const formattedDate = new Date(thread.lastActivity).toLocaleDateString("en-US", {
     month: "short",
@@ -178,33 +150,6 @@ export default function ThreadRow({
               </div>
             );
           })}
-
-          <div className="mt-4 pt-3 border-t border-[#e5e5e5] bg-[#fffbeb] p-3 border border-[#fde68a]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] uppercase font-semibold tracking-wider text-[#b45309]">
-                Interactive Simulator (Demo)
-              </span>
-              <span className="text-[10px] text-[#92400e]">
-                Simulate vendor email reply
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={simulatedReply}
-                onChange={(e) => setSimulatedReply(e.target.value)}
-                placeholder='e.g., "We can do it for $450/week, available from Monday"'
-                className="flex-1 bg-white border border-[#fde68a] px-3 py-1.5 text-xs font-mono text-[#0a0a0a] outline-none focus:border-[#b45309]"
-              />
-              <button
-                onClick={handleSimulate}
-                disabled={simulating || !simulatedReply.trim()}
-                className="bg-[#b45309] hover:bg-[#92400e] text-white font-mono text-xs px-4 py-1.5 uppercase tracking-wider disabled:opacity-50"
-              >
-                {simulating ? "SIMULATING…" : "DISPATCH"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
