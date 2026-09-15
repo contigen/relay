@@ -157,3 +157,31 @@ export const getJob = query({
     return await ctx.db.get(jobId)
   },
 })
+
+export const clearAllJobs = mutation({
+  args: {},
+  handler: async ctx => {
+    const jobs = await ctx.db.query('jobs').collect()
+    for (const job of jobs) {
+      await ctx.db.delete(job._id)
+    }
+    const threads = await ctx.db.query('threads').collect()
+    for (const thread of threads) {
+      await ctx.db.delete(thread._id)
+    }
+    const messages = await ctx.db.query('messages').collect()
+    for (const message of messages) {
+      await ctx.db.delete(message._id)
+    }
+    const decisions = await ctx.db.query('decisions').collect()
+    for (const decision of decisions) {
+      await ctx.db.delete(decision._id)
+    }
+    return {
+      deletedJobs: jobs.length,
+      deletedThreads: threads.length,
+      deletedMessages: messages.length,
+      deletedDecisions: decisions.length,
+    }
+  },
+})

@@ -81,12 +81,19 @@ export default function DashboardView({
 
   const jobs = (useQuery(api.jobs.listJobs, {}) ?? []) as JobDoc[]
   const activeJob =
-    jobs.find(j => (selectedJobId ? j._id === selectedJobId : true)) ?? jobs[0]
+    jobs.find(j => (selectedJobId ? j._id === selectedJobId : true)) ??
+    jobs[0] ??
+    null
 
   const threads = (useQuery(
     api.threads.getThreadsByJob,
     activeJob ? { jobId: activeJob._id } : 'skip',
   ) ?? []) as ThreadDoc[]
+
+  const decisions = (useQuery(
+    api.decisions.getDecisionsByJob,
+    activeJob ? { jobId: activeJob._id } : 'skip',
+  ) ?? []) as DecisionDoc[]
 
   const pendingDecision = (useQuery(
     api.decisions.getPendingDecision,
@@ -126,45 +133,69 @@ export default function DashboardView({
     threads.find(t => t.quote)?.quote ??
     (quotesCount > 0 ? `${quotesCount} quotes` : '—')
 
-  const terminalSteps = [
-    {
-      text: activeJob
-        ? `Task parsed: ${activeJob.parsedIntent?.category || 'Sourcing'} in ${activeJob.parsedIntent?.location || 'target area'}`
-        : 'Standby for new sourcing task...',
-      status: activeJob ? ('done' as const) : ('pending' as const),
-    },
-    {
-      text: activeJob?.firecrawlResults?.length
-        ? `Firecrawl verified ${activeJob.firecrawlResults.length} vendor candidates`
-        : 'Searching verified vendor registry via Firecrawl...',
-      status: (activeJob?.firecrawlResults?.length
-        ? 'done'
-        : activeJob?.status === 'researching'
-          ? 'running'
-          : 'pending') as 'done' | 'running' | 'pending',
-    },
-    {
-      text:
-        threads.length > 0
-          ? `AgentMail coordinated ${threads.length} vendor inquiry threads`
-          : 'Provisioning dedicated AgentMail inboxes...',
-      status: (threads.length > 0
-        ? 'done'
-        : activeJob?.status === 'outreaching'
-          ? 'running'
-          : 'pending') as 'done' | 'running' | 'pending',
-    },
-    {
-      text:
-        activeJob?.status === 'completed'
-          ? 'Final executive report generated and dispatched to client'
-          : activeJob?.status === 'needs_decision'
-            ? 'Awaiting human-in-the-loop decision'
-            : 'Listening for vendor quote replies on webhook...',
-      status: (activeJob?.status === 'completed' ? 'done' : 'running') as
-        'done' | 'running',
-    },
-  ]
+  const totalDecisionsCount = decisions.length
+  const vendorsContactedCount = threads.length
+  const autonomyRate =
+    threads.length > 0
+      ? `${Math.max(0, Math.round(((threads.length - totalDecisionsCount) / threads.length) * 100))}%`
+      : '—'
+
+  const terminalSteps = activeJob
+    ? [
+        {
+          text: `Task parsed: ${activeJob.parsedIntent?.category || 'Sourcing'} in ${activeJob.parsedIntent?.location || 'target area'}`,
+          status: 'done' as const,
+        },
+        {
+          text: activeJob.firecrawlResults?.length
+            ? `Firecrawl verified ${activeJob.firecrawlResults.length} vendor candidates`
+            : 'Searching verified vendor registry via Firecrawl...',
+          status: (activeJob.firecrawlResults?.length
+            ? 'done'
+            : activeJob.status === 'researching'
+              ? 'running'
+              : 'pending') as 'done' | 'running' | 'pending',
+        },
+        {
+          text:
+            threads.length > 0
+              ? `AgentMail coordinated ${threads.length} vendor inquiry threads`
+              : 'Provisioning dedicated AgentMail inboxes...',
+          status: (threads.length > 0
+            ? 'done'
+            : activeJob.status === 'outreaching'
+              ? 'running'
+              : 'pending') as 'done' | 'running' | 'pending',
+        },
+        {
+          text:
+            activeJob.status === 'completed'
+              ? 'Final executive report generated and dispatched to client'
+              : activeJob.status === 'needs_decision'
+                ? 'Awaiting human-in-the-loop decision'
+                : 'Listening for vendor quote replies on webhook...',
+          status: (activeJob.status === 'completed' ? 'done' : 'running') as
+            'done' | 'running',
+        },
+      ]
+    : [
+        {
+          text: 'Agent standby. Awaiting new sourcing task...',
+          status: 'pending' as const,
+        },
+        {
+          text: 'Vendor discovery pipeline idle.',
+          status: 'pending' as const,
+        },
+        {
+          text: 'AgentMail inbox dispatcher standby.',
+          status: 'pending' as const,
+        },
+        {
+          text: 'Quote analysis and compilation engine idle.',
+          status: 'pending' as const,
+        },
+      ]
 
   return (
     <div className='min-h-screen bg-[#fafafa] text-[#0a0a0a] flex flex-col justify-between font-mono'>
@@ -172,7 +203,11 @@ export default function DashboardView({
         <header className='border-b border-[#e5e5e5] bg-white sticky top-0 z-40'>
           <div className='max-w-7xl mx-auto px-6 h-14 flex items-center justify-between'>
             <div className='flex items-center gap-2'>
-              <span className='w-2 h-2 rounded-full bg-[#16a34a] animate-pulse' />
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  activeJob ? 'bg-[#16a34a] animate-pulse' : 'bg-[#a3a3a3]'
+                }`}
+              />
               <span className='font-mono font-bold text-xs tracking-widest uppercase text-[#0a0a0a]'>
                 RELAY
               </span>
@@ -200,9 +235,17 @@ export default function DashboardView({
               <span className='text-[11px] font-mono text-[#737373] hidden sm:inline'>
                 {activeJob?.agentEmail || 'relay-core@agentmail.to'}
               </span>
-              <span className='border border-[#e5e5e5] bg-[#fafafa] text-[#16a34a] text-[10px] font-mono uppercase px-2.5 py-1 flex items-center gap-1.5 font-medium'>
-                <span className='w-1.5 h-1.5 rounded-full bg-[#16a34a]' />
-                AGENT ACTIVE
+              <span
+                className={`border border-[#e5e5e5] bg-[#fafafa] text-[10px] font-mono uppercase px-2.5 py-1 flex items-center gap-1.5 font-medium ${
+                  activeJob ? 'text-[#16a34a]' : 'text-[#737373]'
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    activeJob ? 'bg-[#16a34a]' : 'bg-[#a3a3a3]'
+                  }`}
+                />
+                {activeJob ? 'AGENT ACTIVE' : 'STANDBY'}
               </span>
             </div>
           </div>
@@ -217,29 +260,36 @@ export default function DashboardView({
                 Job History &amp; Archives
               </h2>
               <div className='border border-[#e5e5e5] bg-white p-6'>
-                {jobs.map(j => (
-                  <div
-                    key={j._id}
-                    onClick={() => {
-                      setSelectedJobId(j._id)
-                      setActiveTab('dashboard')
-                    }}
-                    className='p-4 border-b border-[#f0f0f0] last:border-b-0 flex items-center justify-between cursor-pointer hover:bg-[#fafafa]'
-                  >
-                    <div>
-                      <h4 className='font-serif text-lg'>
-                        {j.parsedIntent?.description || j.rawTask}
-                      </h4>
-                      <p className='text-xs text-[#737373] font-mono mt-1'>
-                        {j.userEmail} ·{' '}
-                        {new Date(j.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <span className='font-mono text-xs text-[#16a34a] uppercase'>
-                      {j.status}
-                    </span>
+                {jobs.length === 0 ? (
+                  <div className='py-8 text-center text-xs font-mono text-[#8a8a8a]'>
+                    No past jobs recorded. Dispatch a sourcing run to populate
+                    history.
                   </div>
-                ))}
+                ) : (
+                  jobs.map(j => (
+                    <div
+                      key={j._id}
+                      onClick={() => {
+                        setSelectedJobId(j._id)
+                        setActiveTab('dashboard')
+                      }}
+                      className='p-4 border-b border-[#f0f0f0] last:border-b-0 flex items-center justify-between cursor-pointer hover:bg-[#fafafa]'
+                    >
+                      <div>
+                        <h4 className='font-serif text-lg'>
+                          {j.parsedIntent?.description || j.rawTask}
+                        </h4>
+                        <p className='text-xs text-[#737373] font-mono mt-1'>
+                          {j.userEmail} ·{' '}
+                          {new Date(j.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <span className='font-mono text-xs text-[#16a34a] uppercase'>
+                        {j.status}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           ) : activeTab === 'verify' ? (
@@ -289,21 +339,29 @@ export default function DashboardView({
                 <div>
                   <div className='flex items-center gap-3'>
                     <h1 className='text-4xl font-serif tracking-tight text-[#0a0a0a]'>
-                      Agent #{activeJob ? activeJob._id.slice(-4) : '2026'}
+                      {activeJob
+                        ? `Agent #${activeJob._id.slice(-4)}`
+                        : 'Relay Agent'}
                     </h1>
                     <span className='bg-[#0a0a0a] text-white text-[10px] font-mono px-2.5 py-1 uppercase tracking-wider font-medium'>
-                      ✓ VERIFIED ON CONVEX
+                      {activeJob ? '✓ VERIFIED ON CONVEX' : 'STANDBY'}
                     </span>
                   </div>
                   <p className='font-mono text-xs text-[#737373] mt-2'>
-                    Client:{' '}
-                    <span className='text-[#0a0a0a]'>
-                      {activeJob?.userEmail || 'user@relay.to'}
-                    </span>{' '}
-                    · Inbox:{' '}
-                    <span className='text-[#0a0a0a]'>
-                      {activeJob?.agentEmail || 'relay-agent@agentmail.to'}
-                    </span>
+                    {activeJob ? (
+                      <>
+                        Client:{' '}
+                        <span className='text-[#0a0a0a]'>
+                          {activeJob.userEmail}
+                        </span>{' '}
+                        · Inbox:{' '}
+                        <span className='text-[#0a0a0a]'>
+                          {activeJob.agentEmail || 'Provisioning inbox...'}
+                        </span>
+                      </>
+                    ) : (
+                      'Autonomous vendor discovery, email negotiation & quote intelligence'
+                    )}
                   </p>
                 </div>
 
@@ -326,7 +384,10 @@ export default function DashboardView({
               </div>
 
               <div className='grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8'>
-                <MetricCard label='TOTAL DECISIONS' value={jobs.length || 1} />
+                <MetricCard
+                  label='TOTAL DECISIONS'
+                  value={totalDecisionsCount}
+                />
                 <MetricCard
                   label='QUOTES SECURED'
                   value={bestQuote}
@@ -334,9 +395,9 @@ export default function DashboardView({
                 />
                 <MetricCard
                   label='VENDORS CONTACTED'
-                  value={threads.length || 3}
+                  value={vendorsContactedCount}
                 />
-                <MetricCard label='AUTONOMY RATE' value='98.2%' />
+                <MetricCard label='AUTONOMY RATE' value={autonomyRate} />
               </div>
 
               <div className='grid grid-cols-1 lg:grid-cols-12 gap-8'>
@@ -346,17 +407,29 @@ export default function DashboardView({
                       PLAN SUMMARY
                     </span>
                     <span className='text-[10px] font-mono text-[#8a8a8a]'>
-                      JOB #{activeJob ? activeJob._id.slice(-4) : '—'}
+                      {activeJob
+                        ? `JOB #${activeJob._id.slice(-4)}`
+                        : 'NO ACTIVE JOB'}
                     </span>
                   </div>
 
-                  {activeJob && (
+                  {activeJob ? (
                     <JobCard
                       job={activeJob}
                       selected={true}
                       onSelect={() => {}}
                       onCompileReport={() => setShowSummaryModal(true)}
                     />
+                  ) : (
+                    <div className='border border-dashed border-[#e5e5e5] bg-white p-6 text-center text-xs font-mono text-[#8a8a8a] space-y-3'>
+                      <p>No active sourcing task running.</p>
+                      <button
+                        onClick={() => setShowModal(true)}
+                        className='bg-[#0a0a0a] hover:bg-[#262626] text-white font-mono text-xs uppercase px-4 py-2 tracking-wider transition-colors'
+                      >
+                        START SOURCING RUN ↗
+                      </button>
+                    </div>
                   )}
 
                   <div className='space-y-2'>
@@ -372,7 +445,8 @@ export default function DashboardView({
                       </button>
                       <button
                         onClick={handleTriggerCompile}
-                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors'
+                        disabled={!activeJob}
+                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
                       >
                         Compile report
                       </button>
@@ -382,7 +456,8 @@ export default function DashboardView({
                             navigator.clipboard.writeText(activeJob.agentEmail)
                           }
                         }}
-                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors'
+                        disabled={!activeJob?.agentEmail}
+                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
                       >
                         Copy agent email
                       </button>
@@ -407,7 +482,8 @@ export default function DashboardView({
                             })
                           }
                         }}
-                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors'
+                        disabled={!activeJob}
+                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
                       >
                         Run cycle
                       </button>
@@ -418,9 +494,21 @@ export default function DashboardView({
                     <span className='text-[#8a8a8a] uppercase text-[10px]'>
                       WORKFLOW STATUS
                     </span>
-                    <span className='text-[#16a34a] font-medium flex items-center gap-1.5'>
-                      <span className='w-1.5 h-1.5 rounded-full bg-[#16a34a] animate-pulse' />
-                      CYCLE #12
+                    <span
+                      className={`font-medium flex items-center gap-1.5 ${
+                        activeJob ? 'text-[#16a34a]' : 'text-[#737373]'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          activeJob
+                            ? 'bg-[#16a34a] animate-pulse'
+                            : 'bg-[#a3a3a3]'
+                        }`}
+                      />
+                      {activeJob
+                        ? activeJob.status.toUpperCase().replace('_', ' ')
+                        : 'STANDBY'}
                     </span>
                   </div>
                 </div>
@@ -438,7 +526,9 @@ export default function DashboardView({
                   <TerminalBox
                     steps={terminalSteps}
                     statusLabel={
-                      activeJob ? activeJob.status.toUpperCase() : 'LIVE'
+                      activeJob
+                        ? activeJob.status.toUpperCase().replace('_', ' ')
+                        : 'STANDBY'
                     }
                     onSendQuery={q => {
                       if (activeJob) {
