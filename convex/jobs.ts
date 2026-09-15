@@ -185,3 +185,27 @@ export const clearAllJobs = mutation({
     }
   },
 })
+
+export const cleanMessagePlaceholders = mutation({
+  args: {},
+  handler: async ctx => {
+    const messages = await ctx.db.query('messages').collect()
+    let count = 0
+    for (const msg of messages) {
+      if (msg.body.includes('[') && msg.body.includes(']')) {
+        const cleaned = msg.body
+          .replace(/\[(?:your\s+)?name\]/gi, 'Relay Sourcing Team')
+          .replace(/\[(?:your\s+)?phone(?:\s+number)?\]/gi, '')
+          .replace(/\[[^\]]+\]/g, '')
+          .split('\n')
+          .map(l => l.trimEnd())
+          .filter((l, i, arr) => !(l === '' && arr[i - 1] === ''))
+          .join('\n')
+          .trim()
+        await ctx.db.patch(msg._id, { body: cleaned })
+        count++
+      }
+    }
+    return { cleanedCount: count }
+  },
+})

@@ -15,7 +15,10 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang='en'>
-      <body className='antialiased min-h-screen bg-[#fafafa] text-[#0a0a0a]'>
+      <body
+        className='antialiased min-h-screen bg-[#fafafa] text-[#0a0a0a]'
+        suppressHydrationWarning
+      >
         <ConvexClientProvider>{children}</ConvexClientProvider>
       </body>
     </html>

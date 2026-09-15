@@ -28,6 +28,32 @@ const getAgentMail = () => {
   return new AgentMailClient({ apiKey: process.env.AGENTMAIL_API_KEY || '' })
 }
 
+const sanitizeEmailBody = (text: string): string => {
+  let cleaned = text
+    .replace(/\[(?:your\s+)?name\]/gi, 'Relay Sourcing Team')
+    .replace(/\[(?:your\s+)?phone(?:\s+number)?\]/gi, '')
+    .replace(/\[(?:your\s+)?company(?:\s+name)?\]/gi, 'Relay')
+    .replace(/\[(?:your\s+)?title\]/gi, 'Procurement Coordinator')
+    .replace(/\[(?:insert\s+)?date\]/gi, 'as soon as possible')
+    .replace(/\[[^\]]+\]/g, '')
+
+  cleaned = cleaned
+    .split('\n')
+    .map(line => line.trimEnd())
+    .filter((line, i, arr) => !(line === '' && arr[i - 1] === ''))
+    .join('\n')
+    .trim()
+
+  if (
+    !cleaned.toLowerCase().includes('best regards') &&
+    !cleaned.toLowerCase().includes('sincerely')
+  ) {
+    cleaned += '\n\nBest regards,\nRelay Sourcing Team'
+  }
+
+  return cleaned
+}
+
 type Vendor = {
   name: string
   url?: string
@@ -317,7 +343,7 @@ export const sendOutreach = action({
       })
 
       let subject = `Request for quote: ${jobDescription}`
-      let body = `Hi ${vendor.name} team,\n\nWe are looking for ${jobDescription}.\n${budget ? `Budget: ${budget}\n` : ''}${deadline ? `Timeline: ${deadline}\n` : ''}\nPlease reply with your availability and pricing.\n\nBest regards,\nRelay Sourcing Agent`
+      let body = `Hi ${vendor.name} team,\n\nWe are looking for ${jobDescription}.\n${budget ? `Budget: ${budget}\n` : ''}${deadline ? `Timeline: ${deadline}\n` : ''}\nPlease reply with your availability and pricing.\n\nBest regards,\nRelay Sourcing Team`
 
       try {
         const { text } = await generateText({
@@ -326,6 +352,13 @@ export const sendOutreach = action({
 Task: ${jobDescription}
 Budget: ${budget ?? 'Standard market rates'}
 Deadline: ${deadline ?? 'Soon'}
+Client Contact: ${userEmail}
+
+CRITICAL RULES:
+- Never include bracketed placeholders like [Your Name], [Your Phone Number], [Company Name], etc.
+- Sign off cleanly and directly as:
+Best regards,
+Relay Sourcing Team
 
 Return ONLY valid JSON without markdown:
 {
@@ -339,8 +372,10 @@ Return ONLY valid JSON without markdown:
           .replace(/```$/i, '')
           .trim()
         const parsedDraft = JSON.parse(clean)
-        if (parsedDraft.subject) subject = String(parsedDraft.subject)
-        if (parsedDraft.body) body = String(parsedDraft.body)
+        if (parsedDraft.subject) subject = String(parsedDraft.subject).trim()
+        if (parsedDraft.body) {
+          body = sanitizeEmailBody(String(parsedDraft.body))
+        }
       } catch {
         subject = `Request for quote: ${jobDescription}`
       }
@@ -499,6 +534,12 @@ Return ONLY valid JSON without markdown:
 Question to ask: ${analyzed.followupQuestion}
 Context: ${jobDescription}
 
+CRITICAL RULES:
+- Never include bracketed placeholders like [Your Name], [Your Phone Number], etc.
+- Sign off cleanly and directly as:
+Best regards,
+Relay Sourcing Team
+
 Return ONLY valid JSON without markdown:
 {
   "subject": "Follow-up: ...",
@@ -511,8 +552,8 @@ Return ONLY valid JSON without markdown:
           .replace(/```$/i, '')
           .trim()
         const draft = JSON.parse(clean)
-        if (draft.subject) fs = String(draft.subject)
-        if (draft.body) fb = String(draft.body)
+        if (draft.subject) fs = String(draft.subject).trim()
+        if (draft.body) fb = sanitizeEmailBody(String(draft.body))
       } catch {
         fs = 'Follow-up regarding your quote'
       }

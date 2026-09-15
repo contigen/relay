@@ -69,7 +69,7 @@ type DashboardViewProps = {
   initialTab?: 'dashboard' | 'setup' | 'history' | 'verify'
 }
 
-export default function DashboardView({
+export function DashboardView({
   initialTab = 'dashboard',
 }: DashboardViewProps) {
   const [activeTab, setActiveTab] = useState<
