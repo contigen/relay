@@ -109,7 +109,6 @@ export const updateJobVendors = mutation({
   },
 })
 
-
 export const completeJob = mutation({
   args: {
     jobId: v.id('jobs'),
@@ -137,7 +136,6 @@ export const updateJobSummary = mutation({
     })
   },
 })
-
 
 export const listJobs = query({
   args: { userEmail: v.optional(v.string()) },

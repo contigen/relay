@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+convex/_generated
+bun.lock
+package-lock.json
+*.tsbuildinfo
+.agents
+.claude

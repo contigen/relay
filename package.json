@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "deploy": "npx @convex-dev/static-hosting deploy -d out",
     "deploy:static": "npx @convex-dev/static-hosting upload -d out",
     "deploy:static:prod": "npx @convex-dev/static-hosting upload -d out --prod"
@@ -34,6 +36,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "prettier": "^3.5.3",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
