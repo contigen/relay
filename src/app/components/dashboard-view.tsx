@@ -140,6 +140,20 @@ export function DashboardView({
       ? `${Math.max(0, Math.round(((threads.length - totalDecisionsCount) / threads.length) * 100))}%`
       : '—'
 
+  const jobIndex = activeJob
+    ? Math.max(1, jobs.length - jobs.findIndex(j => j._id === activeJob._id))
+    : 1
+  const agentNumber = String(jobIndex).padStart(2, '0')
+  const agentCategory = activeJob?.parsedIntent?.category
+    ? activeJob.parsedIntent.category.charAt(0).toUpperCase() +
+      activeJob.parsedIntent.category.slice(1)
+    : null
+  const agentTitle = activeJob
+    ? agentCategory
+      ? `Agent #${agentNumber} — ${agentCategory}`
+      : `Agent #${agentNumber}`
+    : 'Relay Agent'
+
   const terminalSteps = activeJob
     ? [
         {
@@ -339,12 +353,12 @@ export function DashboardView({
                 <div>
                   <div className='flex items-center gap-3'>
                     <h1 className='text-4xl font-serif tracking-tight text-[#0a0a0a]'>
-                      {activeJob
-                        ? `Agent #${activeJob._id.slice(-4)}`
-                        : 'Relay Agent'}
+                      {agentTitle}
                     </h1>
                     <span className='bg-[#0a0a0a] text-white text-[10px] font-mono px-2.5 py-1 uppercase tracking-wider font-medium'>
-                      {activeJob ? '✓ VERIFIED ON CONVEX' : 'STANDBY'}
+                      {activeJob
+                        ? `ID: #${activeJob._id.slice(-4).toUpperCase()} · CONVEX`
+                        : 'STANDBY'}
                     </span>
                   </div>
                   <p className='font-mono text-xs text-[#737373] mt-2'>
@@ -407,9 +421,7 @@ export function DashboardView({
                       PLAN SUMMARY
                     </span>
                     <span className='text-[10px] font-mono text-[#8a8a8a]'>
-                      {activeJob
-                        ? `JOB #${activeJob._id.slice(-4)}`
-                        : 'NO ACTIVE JOB'}
+                      {activeJob ? `RUN #${agentNumber}` : 'NO ACTIVE JOB'}
                     </span>
                   </div>
 
