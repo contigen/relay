@@ -48,6 +48,33 @@ const maskEmail = (email: string): string => {
   return `${sliced}@${domain}`
 }
 
+const formatRelativeTime = (createdAt: number, now: number): string => {
+  if (!now || !createdAt) return 'just now'
+  const diffMs = Math.max(0, now - createdAt)
+  const diffMinutes = Math.floor(diffMs / 60000)
+
+  if (diffMinutes < 1) return 'just now'
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+
+  const hours = Math.floor(diffMinutes / 60)
+  const remainingMins = diffMinutes % 60
+
+  if (hours < 24) {
+    return remainingMins > 0
+      ? `${hours}h ${remainingMins}m ago`
+      : `${hours}h ago`
+  }
+
+  const days = Math.floor(hours / 24)
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days}d ago`
+
+  return new Date(createdAt).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 export default function JobCard({
   job,
   selected,
@@ -55,8 +82,6 @@ export default function JobCard({
   onCompileReport,
 }: JobCardProps) {
   const now = useSyncExternalStore(subscribeMinute, getNow, getServerSnapshot)
-  const elapsed =
-    now > 0 ? Math.max(0, Math.round((now - job.createdAt) / 60000)) : 0
 
   const getStatusBadge = () => {
     switch (job.status) {
@@ -140,7 +165,7 @@ export default function JobCard({
         <div className='flex justify-between'>
           <span className='text-[#8a8a8a]'>Created:</span>
           <span className='text-[#737373]'>
-            {elapsed < 1 ? 'just now' : `${elapsed}m ago`}
+            {formatRelativeTime(job.createdAt, now)}
           </span>
         </div>
       </div>

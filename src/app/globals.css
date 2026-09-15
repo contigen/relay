@@ -26,29 +26,31 @@
   --purple-soft: #f5f3ff;
 }
 
-* {
-  box-sizing: border-box;
-}
+@layer base {
+  body {
+    font-family: var(--font-mono);
+    background: var(--surface-subtle);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
 
-body {
-  font-family: var(--font-mono);
-  background: var(--surface-subtle);
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.5;
-  margin: 0;
-  -webkit-font-smoothing: antialiased;
-}
+  .font-serif {
+    font-family: var(--font-serif);
+  }
 
-.font-serif {
-  font-family: var(--font-serif);
-}
+  .font-mono {
+    font-family: var(--font-mono);
+  }
 
-.font-mono {
-  font-family: var(--font-mono);
-}
+  ::selection {
+    background: #000;
+    color: #fff;
+  }
 
-::selection {
-  background: #000;
-  color: #fff;
+  button {
+    @apply cursor-pointer;
+  }
 }
