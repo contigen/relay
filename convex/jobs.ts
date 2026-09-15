@@ -209,3 +209,31 @@ export const cleanMessagePlaceholders = mutation({
     return { cleanedCount: count }
   },
 })
+
+export const deleteJob = mutation({
+  args: { jobId: v.id('jobs') },
+  handler: async (ctx, { jobId }) => {
+    const threads = await ctx.db
+      .query('threads')
+      .withIndex('by_job', q => q.eq('jobId', jobId))
+      .collect()
+    for (const thread of threads) {
+      const messages = await ctx.db
+        .query('messages')
+        .withIndex('by_thread', q => q.eq('threadId', thread._id))
+        .collect()
+      for (const msg of messages) {
+        await ctx.db.delete(msg._id)
+      }
+      await ctx.db.delete(thread._id)
+    }
+    const decisions = await ctx.db
+      .query('decisions')
+      .withIndex('by_job', q => q.eq('jobId', jobId))
+      .collect()
+    for (const dec of decisions) {
+      await ctx.db.delete(dec._id)
+    }
+    await ctx.db.delete(jobId)
+  },
+})

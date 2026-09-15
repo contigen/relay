@@ -66,7 +66,7 @@ type DecisionDoc = {
 }
 
 type DashboardViewProps = {
-  initialTab?: 'dashboard' | 'setup' | 'history' | 'verify'
+  initialTab?: 'dashboard' | 'setup' | 'history'
 }
 
 const maskEmail = (email?: string): string => {
@@ -82,9 +82,9 @@ const maskEmail = (email?: string): string => {
 export function DashboardView({
   initialTab = 'dashboard',
 }: DashboardViewProps) {
-  const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'setup' | 'history' | 'verify'
-  >(initialTab)
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'setup' | 'history'>(
+    initialTab,
+  )
   const [selectedJobId, setSelectedJobId] = useState<Id<'jobs'> | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [showSummaryModal, setShowSummaryModal] = useState(false)
@@ -230,21 +230,19 @@ export function DashboardView({
             </div>
 
             <nav className='flex items-center gap-8'>
-              {(['setup', 'dashboard', 'history', 'verify'] as const).map(
-                tab => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`font-mono text-xs uppercase tracking-wider py-4 border-b-2 transition-colors ${
-                      activeTab === tab
-                        ? 'border-[#0a0a0a] text-[#0a0a0a] font-semibold'
-                        : 'border-transparent text-[#737373] hover:text-[#0a0a0a]'
-                    }`}
-                  >
-                    {tab}
-                  </button>
-                ),
-              )}
+              {(['dashboard', 'setup', 'history'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`font-mono text-xs uppercase tracking-wider py-4 border-b-2 transition-colors ${
+                    activeTab === tab
+                      ? 'border-[#0a0a0a] text-[#0a0a0a] font-semibold'
+                      : 'border-transparent text-[#737373] hover:text-[#0a0a0a]'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
             </nav>
 
             <div className='flex items-center gap-3'>
@@ -306,47 +304,6 @@ export function DashboardView({
                     </div>
                   ))
                 )}
-              </div>
-            </div>
-          ) : activeTab === 'verify' ? (
-            <div className='border border-[#e5e5e5] bg-white p-8 space-y-6'>
-              <h2 className='font-serif text-3xl font-normal text-[#0a0a0a]'>
-                System Verification &amp; Invariant Proofs
-              </h2>
-              <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
-                <div className='p-4 border border-[#e5e5e5] bg-[#fafafa]'>
-                  <span className='text-xs uppercase text-[#737373] block mb-1'>
-                    CONVEX HOSTING
-                  </span>
-                  <span className='text-sm font-semibold text-[#16a34a] block'>
-                    PASS (200 OK)
-                  </span>
-                  <span className='text-[11px] text-[#737373] mt-2 block'>
-                    energetic-koala-352.convex.site
-                  </span>
-                </div>
-                <div className='p-4 border border-[#e5e5e5] bg-[#fafafa]'>
-                  <span className='text-xs uppercase text-[#737373] block mb-1'>
-                    AI ENGINE
-                  </span>
-                  <span className='text-sm font-semibold text-[#16a34a] block'>
-                    GEMINI 3.6 FLASH
-                  </span>
-                  <span className='text-[11px] text-[#737373] mt-2 block'>
-                    Vercel AI SDK Google Adapter
-                  </span>
-                </div>
-                <div className='p-4 border border-[#e5e5e5] bg-[#fafafa]'>
-                  <span className='text-xs uppercase text-[#737373] block mb-1'>
-                    AGENTMAIL WEBHOOK
-                  </span>
-                  <span className='text-sm font-semibold text-[#16a34a] block'>
-                    ONLINE
-                  </span>
-                  <span className='text-[11px] text-[#737373] mt-2 block'>
-                    /webhook/agentmail
-                  </span>
-                </div>
               </div>
             </div>
           ) : (
@@ -480,12 +437,6 @@ export function DashboardView({
                         Setup wizard
                       </button>
                       <button
-                        onClick={() => setActiveTab('verify')}
-                        className='p-2.5 border border-[#e5e5e5] bg-white hover:border-[#0a0a0a] text-center text-[#525252] hover:text-[#0a0a0a] transition-colors'
-                      >
-                        System verify
-                      </button>
-                      <button
                         onClick={() => {
                           if (activeJob) {
                             startPipeline({
@@ -543,12 +494,19 @@ export function DashboardView({
                         : 'STANDBY'
                     }
                     onSendQuery={q => {
-                      if (activeJob) {
-                        startPipeline({
-                          userEmail: activeJob.userEmail,
-                          rawTask: q,
-                        })
+                      if (!activeJob) return
+                      const isQuestion =
+                        /\b(update|status|progress|quote|how many|what|when|where|who)\b/i.test(
+                          q,
+                        ) || q.trim().endsWith('?')
+                      if (isQuestion) {
+                        handleTriggerCompile()
+                        return
                       }
+                      startPipeline({
+                        userEmail: activeJob.userEmail,
+                        rawTask: q,
+                      })
                     }}
                   />
 

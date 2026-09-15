@@ -76,7 +76,7 @@ export default function TerminalBox({
           type='text'
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder='Ask about your sourcing jobs, or run a new search...'
+          placeholder='Start a new sourcing task (e.g. Find 3 caterers in NYC under $1,200)...'
           className='flex-1 bg-[#fafafa] border border-[#e5e5e5] px-3.5 py-2 text-xs font-mono text-[#0a0a0a] outline-none focus:border-[#0a0a0a] focus:bg-white'
         />
         <button
@@ -84,7 +84,7 @@ export default function TerminalBox({
           disabled={!prompt.trim()}
           className='bg-[#0a0a0a] hover:bg-[#262626] text-white font-mono text-xs px-5 py-2 uppercase tracking-wider disabled:opacity-40 transition-colors'
         >
-          SEND
+          DISPATCH
         </button>
       </form>
     </div>
