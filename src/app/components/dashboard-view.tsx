@@ -69,6 +69,16 @@ type DashboardViewProps = {
   initialTab?: 'dashboard' | 'setup' | 'history' | 'verify'
 }
 
+const maskEmail = (email?: string): string => {
+  if (!email || !email.includes('@')) return email ?? '—'
+  const [local, domain] = email.split('@')
+  const sliced =
+    local.length > 4
+      ? `${local.slice(0, 3)}...${local.slice(-2)}`
+      : `${local.slice(0, 1)}...`
+  return `${sliced}@${domain}`
+}
+
 export function DashboardView({
   initialTab = 'dashboard',
 }: DashboardViewProps) {
@@ -144,15 +154,7 @@ export function DashboardView({
     ? Math.max(1, jobs.length - jobs.findIndex(j => j._id === activeJob._id))
     : 1
   const agentNumber = String(jobIndex).padStart(2, '0')
-  const agentCategory = activeJob?.parsedIntent?.category
-    ? activeJob.parsedIntent.category.charAt(0).toUpperCase() +
-      activeJob.parsedIntent.category.slice(1)
-    : null
-  const agentTitle = activeJob
-    ? agentCategory
-      ? `Agent #${agentNumber} — ${agentCategory}`
-      : `Agent #${agentNumber}`
-    : 'Relay Agent'
+  const agentTitle = activeJob ? `Agent #${agentNumber}` : 'Relay Agent'
 
   const terminalSteps = activeJob
     ? [
@@ -294,7 +296,7 @@ export function DashboardView({
                           {j.parsedIntent?.description || j.rawTask}
                         </h4>
                         <p className='text-xs text-[#737373] font-mono mt-1'>
-                          {j.userEmail} ·{' '}
+                          {maskEmail(j.userEmail)} ·{' '}
                           {new Date(j.createdAt).toLocaleDateString()}
                         </p>
                       </div>
@@ -356,9 +358,7 @@ export function DashboardView({
                       {agentTitle}
                     </h1>
                     <span className='bg-[#0a0a0a] text-white text-[10px] font-mono px-2.5 py-1 uppercase tracking-wider font-medium'>
-                      {activeJob
-                        ? `ID: #${activeJob._id.slice(-4).toUpperCase()} · CONVEX`
-                        : 'STANDBY'}
+                      {activeJob ? '✓ VERIFIED ON CONVEX' : 'STANDBY'}
                     </span>
                   </div>
                   <p className='font-mono text-xs text-[#737373] mt-2'>
@@ -366,7 +366,7 @@ export function DashboardView({
                       <>
                         Client:{' '}
                         <span className='text-[#0a0a0a]'>
-                          {activeJob.userEmail}
+                          {maskEmail(activeJob.userEmail)}
                         </span>{' '}
                         · Inbox:{' '}
                         <span className='text-[#0a0a0a]'>

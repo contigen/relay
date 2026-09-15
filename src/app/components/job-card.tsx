@@ -38,6 +38,16 @@ const subscribeMinute = (callback: () => void) => {
 const getNow = () => Date.now()
 const getServerSnapshot = () => 0
 
+const maskEmail = (email: string): string => {
+  if (!email || !email.includes('@')) return email
+  const [local, domain] = email.split('@')
+  const sliced =
+    local.length > 4
+      ? `${local.slice(0, 3)}...${local.slice(-2)}`
+      : `${local.slice(0, 1)}...`
+  return `${sliced}@${domain}`
+}
+
 export default function JobCard({
   job,
   selected,
@@ -94,7 +104,7 @@ export default function JobCard({
     >
       <div className='flex items-center justify-between gap-2 mb-3'>
         <span className='font-mono text-[10px] text-[#737373]'>
-          {job.userEmail}
+          {maskEmail(job.userEmail)}
         </span>
         <span
           className={`flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 border border-[#e5e5e5] uppercase ${badge.bg} ${badge.color}`}
