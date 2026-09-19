@@ -6,14 +6,20 @@ import { api } from '@/convex/_generated/api'
 
 type SetupViewProps = {
   onPlanCreated: () => void
+  initialEmail?: string
+  onSuccess?: (email: string) => void
 }
 
 type PlanPreview = {
   task: string
 }
 
-export default function SetupView({ onPlanCreated }: SetupViewProps) {
-  const [email, setEmail] = useState('')
+export default function SetupView({
+  onPlanCreated,
+  initialEmail = '',
+  onSuccess,
+}: SetupViewProps) {
+  const [email, setEmail] = useState(initialEmail)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [plan, setPlan] = useState<PlanPreview | null>(null)
@@ -26,10 +32,15 @@ export default function SetupView({ onPlanCreated }: SetupViewProps) {
   }
 
   const handleDispatch = async () => {
-    if (!plan || loading) return
+    const trimmedEmail = email.trim()
+    if (!plan || !trimmedEmail || loading) return
     setLoading(true)
     try {
-      await startPipeline({ userEmail: email, rawTask: plan.task })
+      await startPipeline({ userEmail: trimmedEmail, rawTask: plan.task })
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('relay_user_email', trimmedEmail)
+      }
+      onSuccess?.(trimmedEmail)
       onPlanCreated()
     } finally {
       setLoading(false)

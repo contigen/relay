@@ -1,19 +1,23 @@
-import { DashboardView } from '../components/dashboard-view'
+'use client'
 
-type JobsPageProps = {
-  searchParams: Promise<{
-    tab?: 'dashboard' | 'setup' | 'history'
-    email?: string
-    job?: string
-  }>
+import { Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { DashboardView } from '@/app/components/dashboard-view'
+
+function JobsContent() {
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const tab =
+    tabParam === 'setup' || tabParam === 'history' ? tabParam : 'dashboard'
+  const job = searchParams.get('job') ?? undefined
+
+  return <DashboardView initialTab={tab} initialJobId={job} />
 }
 
-export default async function JobsPage({ searchParams }: JobsPageProps) {
-  const params = await searchParams
+export default function JobsPage() {
   return (
-    <DashboardView
-      initialTab={params.tab || 'dashboard'}
-      initialJobId={params.job}
-    />
+    <Suspense fallback={null}>
+      <JobsContent />
+    </Suspense>
   )
 }

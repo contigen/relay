@@ -6,6 +6,8 @@ import { api } from '@/convex/_generated/api'
 
 type NewJobModalProps = {
   onClose: () => void
+  initialEmail?: string
+  onSuccess?: (email: string) => void
 }
 
 const EXAMPLES = [
@@ -14,18 +16,27 @@ const EXAMPLES = [
   'Source 3 freelance commercial photographers in Seattle, budget $800, needed by end of month',
 ]
 
-export default function NewJobModal({ onClose }: NewJobModalProps) {
-  const [email, setEmail] = useState('')
+export default function NewJobModal({
+  onClose,
+  initialEmail = '',
+  onSuccess,
+}: NewJobModalProps) {
+  const [email, setEmail] = useState(initialEmail)
   const [task, setTask] = useState('')
   const [loading, setLoading] = useState(false)
   const startPipeline = useAction(api.agent.startPipeline)
 
   const handleSubmit = async () => {
-    if (!email.trim() || !task.trim() || loading) return
+    const trimmedEmail = email.trim()
+    if (!trimmedEmail || !task.trim() || loading) return
     setLoading(true)
 
     try {
-      await startPipeline({ userEmail: email, rawTask: task })
+      await startPipeline({ userEmail: trimmedEmail, rawTask: task })
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('relay_user_email', trimmedEmail)
+      }
+      onSuccess?.(trimmedEmail)
       onClose()
     } finally {
       setLoading(false)
