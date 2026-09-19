@@ -1,7 +1,7 @@
 'use node'
 
 import process from 'node:process'
-import { action } from './_generated/server'
+import { action, internalAction } from './_generated/server'
 import { api } from './_generated/api'
 import { v } from 'convex/values'
 import { Id } from './_generated/dataModel'
@@ -9,6 +9,28 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText } from 'ai'
 import { FirecrawlClient } from 'firecrawl'
 import { AgentMailClient } from 'agentmail'
+import {
+  renderAcknowledgmentEmail,
+  renderOutreachEmail,
+  renderVendorReplyEmail,
+  renderExecutiveSummaryEmail,
+  renderDecisionRequiredEmail,
+} from './templates'
+
+const extractEmail = (fromStr: string): string => {
+  if (!fromStr) return ''
+  const match = fromStr.match(/<([^>]+)>/)
+  if (match) return match[1].trim().toLowerCase()
+  return fromStr.trim().toLowerCase()
+}
+
+const getDashboardUrl = (jobId: string) => {
+  const base =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.CONVEX_SITE_URL ||
+    'https://energetic-koala-352.convex.site'
+  return `${base.replace(/\/$/, '')}/jobs?job=${jobId}`
+}
 
 const getGeminiModel = () => {
   const key =
@@ -26,6 +48,46 @@ const getFirecrawl = () => {
 
 const getAgentMail = () => {
   return new AgentMailClient({ apiKey: process.env.AGENTMAIL_API_KEY || '' })
+}
+
+let rateLimitedUntil = 0
+
+const safeSend = async (
+  inboxId: string,
+  opts: { to: string[]; subject: string; text: string; html?: string },
+): Promise<boolean> => {
+  if (Date.now() < rateLimitedUntil) return false
+  try {
+    await getAgentMail().inboxes.messages.send(inboxId, opts)
+    return true
+  } catch (err: unknown) {
+    const statusCode = (err as { statusCode?: number }).statusCode
+    if (statusCode === 429) {
+      const body = (err as { body?: { window?: string } }).body
+      rateLimitedUntil =
+        Date.now() + (body?.window === 'daily' ? 3600000 : 60000)
+    }
+    return false
+  }
+}
+
+const ensureWebhookRegistered = async () => {
+  try {
+    const siteUrl =
+      process.env.CONVEX_SITE_URL || 'https://energetic-koala-352.convex.site'
+    const webhookUrl = `${siteUrl.replace(/\/$/, '')}/webhook/agentmail`
+    const client = getAgentMail()
+    const list = await client.webhooks.list()
+    const exists = list.webhooks?.some(w => w.url === webhookUrl)
+    if (!exists) {
+      await client.webhooks.create({
+        url: webhookUrl,
+        eventTypes: ['message.received'],
+      })
+    }
+  } catch (err) {
+    console.warn('Webhook registration note:', err)
+  }
 }
 
 const sanitizeEmailBody = (text: string): string => {
@@ -135,13 +197,19 @@ Task: "${rawTask}"`,
       if (firstInbox) {
         agentInboxId = firstInbox.inboxId
         agentEmail = firstInbox.email
+        try {
+          await getAgentMail().inboxes.update(agentInboxId, {
+            displayName: 'Relay',
+          })
+        } catch {}
       } else {
         const inbox = await getAgentMail().inboxes.create({
-          displayName: 'Relay Agent',
+          displayName: 'Relay',
         })
         agentInboxId = inbox.inboxId
         agentEmail = inbox.email
       }
+      await ensureWebhookRegistered()
     } catch (err) {
       console.error('AGENTMAIL_INIT_ERROR:', err)
       throw new Error(
@@ -328,7 +396,8 @@ export const sendOutreach = action({
 
     let sentCount = 0
     for (const vendor of vendors) {
-      const vendorEmail = vendor.email
+      const vendorEmail =
+        process.env.VENDOR_TEST_EMAIL || 'contigenhq@gmail.com'
       if (!vendorEmail || !vendorEmail.includes('@')) {
         continue
       }
@@ -380,13 +449,11 @@ Return ONLY valid JSON without markdown:
         subject = `Request for quote: ${jobDescription}`
       }
 
-      try {
-        await getAgentMail().inboxes.messages.send(agentInboxId, {
-          to: [vendorEmail],
-          subject,
-          text: body,
-        })
-      } catch {}
+      await safeSend(agentInboxId, {
+        to: [vendorEmail],
+        subject,
+        text: body,
+      })
 
       await ctx.runMutation(api.threads.addMessage, {
         threadId,
@@ -416,13 +483,21 @@ Return ONLY valid JSON without markdown:
       status: 'awaiting_replies',
     })
 
-    try {
-      await getAgentMail().inboxes.messages.send(agentInboxId, {
-        to: [userEmail],
-        subject: `Relay: We reached out to ${sentCount} vendors`,
-        text: `We have sent inquiries to ${vendors.map(v => v.name).join(', ')} regarding: "${jobDescription}".\n\nWe will analyze all replies and compile quotes.`,
-      })
-    } catch {}
+    const userSubject = `Relay: We reached out to ${sentCount} vendors`
+    const userText = `We have sent inquiries to ${vendors.map(v => v.name).join(', ')} regarding: "${jobDescription}".\n\nWe will analyze all replies and compile quotes.`
+    const userHtml = renderOutreachEmail({
+      jobId,
+      dashboardUrl: getDashboardUrl(jobId),
+      jobDescription,
+      vendorNames: vendors.map(v => v.name),
+    })
+
+    await safeSend(agentInboxId, {
+      to: [userEmail],
+      subject: userSubject,
+      text: userText,
+      html: userHtml,
+    })
   },
 })
 
@@ -436,6 +511,8 @@ export const processReply = action({
     agentEmail: v.string(),
     vendorEmail: v.string(),
     jobDescription: v.string(),
+    userEmail: v.string(),
+    agentMailMessageId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const {
@@ -446,7 +523,23 @@ export const processReply = action({
       agentInboxId,
       vendorEmail,
       jobDescription,
+      userEmail,
+      agentMailMessageId,
     } = args
+
+    if (agentMailMessageId) {
+      const existingThreadMsgs = await ctx.runQuery(
+        api.threads.getMessagesByThread,
+        { threadId },
+      )
+      if (
+        existingThreadMsgs.some(
+          m => m.agentMailMessageId === agentMailMessageId,
+        )
+      ) {
+        return { status: 'already_processed' }
+      }
+    }
 
     await ctx.runMutation(api.threads.addMessage, {
       threadId,
@@ -454,6 +547,7 @@ export const processReply = action({
       direction: 'inbound',
       subject: `Reply from ${vendorName}`,
       body: replyBody,
+      agentMailMessageId,
     })
 
     await ctx.runMutation(api.threads.updateThreadStatus, {
@@ -507,6 +601,36 @@ Return ONLY valid JSON without markdown:
       }
     }
 
+    const isAutoReply = (text: string) => {
+      const lower = text.toLowerCase()
+      return (
+        lower.includes('thank you for emailing') ||
+        lower.includes('thank you for contacting') ||
+        lower.includes('auto-reply') ||
+        lower.includes('autoreply') ||
+        lower.includes('automatic reply') ||
+        lower.includes('out of office') ||
+        lower.includes('mailer-daemon') ||
+        lower.includes('undelivered') ||
+        lower.includes('confidential and proprietary')
+      )
+    }
+
+    if (isAutoReply(replyBody)) {
+      return { status: 'auto_reply_ignored' }
+    }
+
+    const threadMsgs = await ctx.runQuery(api.threads.getMessagesByThread, {
+      threadId,
+    })
+    const outboundCount = threadMsgs.filter(
+      m => m.direction === 'outbound',
+    ).length
+    if (outboundCount >= 2 && analyzed.action === 'ask_followup') {
+      analyzed.action = 'mark_complete'
+      analyzed.followupQuestion = null
+    }
+
     if (analyzed.hasQuote && analyzed.quoteAmount) {
       await ctx.runMutation(api.threads.updateThreadStatus, {
         threadId,
@@ -558,13 +682,14 @@ Return ONLY valid JSON without markdown:
         fs = 'Follow-up regarding your quote'
       }
 
-      try {
-        await getAgentMail().inboxes.messages.send(agentInboxId, {
-          to: [vendorEmail],
-          subject: fs,
-          text: fb,
-        })
-      } catch {}
+      const targetVendorEmail =
+        process.env.VENDOR_TEST_EMAIL || 'contigenhq@gmail.com' || vendorEmail
+
+      await safeSend(agentInboxId, {
+        to: [targetVendorEmail],
+        subject: fs,
+        text: fb,
+      })
 
       await ctx.runMutation(api.threads.addMessage, {
         threadId,
@@ -577,6 +702,69 @@ Return ONLY valid JSON without markdown:
       await ctx.runMutation(api.threads.updateThreadStatus, {
         threadId,
         status: 'following_up',
+      })
+    }
+
+    const statusHeadline =
+      analyzed.hasQuote && analyzed.quoteAmount
+        ? `Quote Received: ${analyzed.quoteAmount}`
+        : analyzed.action === 'mark_declined'
+          ? 'Vendor Declined'
+          : 'Follow-up Sent'
+
+    const userEmailSubject = `Relay: Response from ${vendorName} (${statusHeadline})`
+    const userEmailBody = `Hello,
+
+We received a response from ${vendorName} regarding your request: "${jobDescription}".
+
+Status: ${statusHeadline}
+Vendor Notes: ${analyzed.summary || 'Vendor replied to our inquiry.'}
+${analyzed.quoteAmount ? `Quote: ${analyzed.quoteAmount}\n` : ''}${analyzed.action === 'ask_followup' && analyzed.followupQuestion ? `Relay Follow-up: We asked the vendor: "${analyzed.followupQuestion}"\n` : ''}
+All activity has been updated on your Relay dashboard.
+
+Best regards,
+Relay Sourcing Team`
+
+    const userEmailHtml = renderVendorReplyEmail({
+      jobId,
+      dashboardUrl: getDashboardUrl(jobId),
+      jobDescription,
+      vendorName,
+      statusHeadline,
+      summary: analyzed.summary || 'Vendor replied to our inquiry.',
+      quoteAmount: analyzed.quoteAmount,
+      followupQuestion:
+        analyzed.action === 'ask_followup' ? analyzed.followupQuestion : null,
+    })
+
+    await safeSend(agentInboxId, {
+      to: [userEmail],
+      subject: userEmailSubject,
+      text: userEmailBody,
+      html: userEmailHtml,
+    })
+
+    const allThreads = await ctx.runQuery(api.threads.getThreadsByJob, {
+      jobId,
+    })
+    const remainingPending = allThreads.filter(
+      t =>
+        t.status === 'pending' ||
+        t.status === 'sent' ||
+        t.status === 'replied' ||
+        t.status === 'following_up',
+    )
+    const currentJob = await ctx.runQuery(api.jobs.getJob, { jobId })
+    if (
+      currentJob?.status !== 'completed' &&
+      remainingPending.length === 0 &&
+      allThreads.length > 0
+    ) {
+      await ctx.runAction(api.agent.compileSummary, {
+        jobId,
+        userEmail,
+        jobDescription,
+        agentInboxId,
       })
     }
 
@@ -645,13 +833,19 @@ Include:
       body = text
     } catch {}
 
-    try {
-      await getAgentMail().inboxes.messages.send(agentInboxId, {
-        to: [userEmail],
-        subject,
-        text: body,
-      })
-    } catch {}
+    const summaryHtml = renderExecutiveSummaryEmail({
+      jobId,
+      dashboardUrl: getDashboardUrl(jobId),
+      jobDescription,
+      summaryText: body,
+    })
+
+    await safeSend(agentInboxId, {
+      to: [userEmail],
+      subject,
+      text: body,
+      html: summaryHtml,
+    })
 
     await ctx.runMutation(api.jobs.updateJobSummary, { jobId, summary: body })
     return { summary: body }
@@ -683,13 +877,22 @@ export const requestDecision = action({
       },
     )
 
-    try {
-      await getAgentMail().inboxes.messages.send(agentInboxId, {
-        to: [userEmail],
-        subject: `[Action Required] Relay needs your input`,
-        text: `Relay needs a decision to continue your sourcing job:\n\n"${question}"\n\nContext: ${context}\n${options ? `Options:\n${options.map(o => `• ${o}`).join('\n')}\n` : ''}\nReply directly to this email or resolve on your dashboard.`,
-      })
-    } catch {}
+    const decisionText = `Relay needs a decision to continue your sourcing job:\n\n"${question}"\n\nContext: ${context}\n${options ? `Options:\n${options.map(o => `• ${o}`).join('\n')}\n` : ''}\nReply directly to this email or resolve on your dashboard.`
+    const decisionHtml = renderDecisionRequiredEmail({
+      jobId,
+      dashboardUrl: getDashboardUrl(jobId),
+      jobDescription: context,
+      question,
+      context,
+      options: options ?? [],
+    })
+
+    await safeSend(agentInboxId, {
+      to: [userEmail],
+      subject: `[Action Required] Relay needs your input`,
+      text: decisionText,
+      html: decisionHtml,
+    })
 
     await ctx.runMutation(api.jobs.updateJobStatus, {
       jobId,
@@ -703,14 +906,16 @@ export const startPipeline = action({
   args: {
     userEmail: v.string(),
     rawTask: v.string(),
+    sourceMessageId: v.optional(v.string()),
   },
   handler: async (
     ctx,
-    { userEmail, rawTask },
+    { userEmail, rawTask, sourceMessageId },
   ): Promise<{ jobId: Id<'jobs'> }> => {
     const jobId: Id<'jobs'> = await ctx.runMutation(api.jobs.createJob, {
       userEmail,
       rawTask,
+      sourceMessageId,
     })
 
     const {
@@ -723,6 +928,19 @@ export const startPipeline = action({
         rawTask,
         userEmail,
       })
+
+    const userAckHtml = renderAcknowledgmentEmail({
+      jobId,
+      dashboardUrl: getDashboardUrl(jobId),
+      taskDescription: parsed.description ?? rawTask,
+    })
+
+    await safeSend(agentInboxId, {
+      to: [userEmail],
+      subject: 'Relay: Sourcing request received',
+      text: `Hi,\n\nWe received your sourcing request: "${rawTask}".\n\nRelay is currently analyzing requirements, discovering verified vendors, and dispatching inquiries.\n\nTrack real-time progress on your dashboard: ${getDashboardUrl(jobId)}\n\nBest regards,\nRelay Sourcing Team`,
+      html: userAckHtml,
+    })
 
     const { vendors }: { vendors: Vendor[] } = await ctx.runAction(
       api.agent.researchVendors,
@@ -755,5 +973,276 @@ export const startPipeline = action({
     }
 
     return { jobId }
+  },
+})
+
+export const syncInboxMessages = action({
+  args: { jobId: v.optional(v.id('jobs')) },
+  handler: async (ctx, { jobId }) => {
+    let targetJob = null
+    if (jobId) {
+      targetJob = await ctx.runQuery(api.jobs.getJob, { jobId })
+    } else {
+      const jobs = await ctx.runQuery(api.jobs.listJobs, {})
+      targetJob =
+        jobs.find(
+          j =>
+            j.status === 'awaiting_replies' ||
+            j.status === 'needs_decision' ||
+            j.status === 'outreaching',
+        ) ?? jobs[0]
+    }
+
+    if (!targetJob || !targetJob.agentInboxId) {
+      return { synced: 0, reason: 'no_job_or_inbox' }
+    }
+
+    await ensureWebhookRegistered()
+
+    const client = getAgentMail()
+    let messagesResponse
+    try {
+      messagesResponse = await client.inboxes.messages.list(
+        targetJob.agentInboxId,
+      )
+    } catch (err) {
+      console.error('Failed to list messages from AgentMail:', err)
+      return { synced: 0, error: String(err) }
+    }
+
+    const messages = messagesResponse.messages ?? []
+    if (messages.length === 0) {
+      return { synced: 0 }
+    }
+
+    const existingMessages = await ctx.runQuery(api.threads.getMessagesByJob, {
+      jobId: targetJob._id,
+    })
+    const knownMessageIds = new Set(
+      existingMessages
+        .map(m => m.agentMailMessageId)
+        .filter((id): id is string => Boolean(id)),
+    )
+
+    const threads = await ctx.runQuery(api.threads.getThreadsByJob, {
+      jobId: targetJob._id,
+    })
+
+    let syncedCount = 0
+    for (const msg of messages) {
+      if (msg.messageId && knownMessageIds.has(msg.messageId)) {
+        continue
+      }
+      if (msg.messageId) {
+        knownMessageIds.add(msg.messageId)
+      }
+
+      const rawFrom = String(msg.from || '')
+      const senderEmail = extractEmail(rawFrom)
+
+      if (
+        targetJob.agentEmail &&
+        senderEmail === extractEmail(targetJob.agentEmail)
+      ) {
+        continue
+      }
+
+      let rawBody = String(msg.preview || '').trim()
+      try {
+        const fullMsg = await client.inboxes.messages.get(
+          targetJob.agentInboxId,
+          msg.messageId,
+        )
+        rawBody = String(
+          fullMsg.text || fullMsg.extractedText || fullMsg.preview || rawBody,
+        ).trim()
+      } catch {}
+
+      if (!rawBody) {
+        continue
+      }
+
+      const matchingThread = threads.find(t => {
+        const ve = t.vendorEmail.toLowerCase().trim()
+        return (
+          senderEmail === ve ||
+          senderEmail.includes(ve) ||
+          ve.includes(senderEmail) ||
+          rawFrom.toLowerCase().includes(ve) ||
+          (t.vendorName &&
+            rawFrom.toLowerCase().includes(t.vendorName.toLowerCase()))
+        )
+      })
+
+      if (matchingThread) {
+        await ctx.runAction(api.agent.processReply, {
+          jobId: targetJob._id,
+          threadId: matchingThread._id,
+          replyBody: rawBody,
+          vendorName: matchingThread.vendorName,
+          agentInboxId: targetJob.agentInboxId,
+          agentEmail: targetJob.agentEmail || '',
+          vendorEmail: matchingThread.vendorEmail,
+          jobDescription:
+            targetJob.parsedIntent?.description ?? targetJob.rawTask,
+          userEmail: targetJob.userEmail,
+          agentMailMessageId: msg.messageId,
+        })
+        syncedCount++
+      } else if (senderEmail === extractEmail(targetJob.userEmail)) {
+        const pending = await ctx.runQuery(api.decisions.getPendingDecision, {
+          jobId: targetJob._id,
+        })
+        if (pending) {
+          await ctx.runMutation(api.decisions.resolveDecision, {
+            decisionId: pending._id,
+            userReply: rawBody,
+          })
+          await ctx.runAction(api.agent.compileSummary, {
+            jobId: targetJob._id,
+            userEmail: targetJob.userEmail,
+            jobDescription:
+              targetJob.parsedIntent?.description ?? targetJob.rawTask,
+            agentInboxId: targetJob.agentInboxId,
+          })
+          syncedCount++
+        }
+      }
+    }
+
+    return { synced: syncedCount, totalFetched: messages.length }
+  },
+})
+
+export const syncPrimaryInbound = action({
+  args: {},
+  handler: async ctx => {
+    await ensureWebhookRegistered()
+
+    const client = getAgentMail()
+    let inboxesList
+    try {
+      inboxesList = await client.inboxes.list()
+    } catch (err) {
+      console.error('Failed to list inboxes:', err)
+      return { synced: 0 }
+    }
+
+    const primaryInbox = inboxesList.inboxes?.[0]
+    if (!primaryInbox) return { synced: 0 }
+
+    let messagesResponse
+    try {
+      messagesResponse = await client.inboxes.messages.list(
+        primaryInbox.inboxId,
+      )
+    } catch (err) {
+      console.error('Failed to list messages from primary inbox:', err)
+      return { synced: 0 }
+    }
+
+    const messages = messagesResponse.messages ?? []
+    if (messages.length === 0) return { synced: 0 }
+
+    const jobs = await ctx.runQuery(api.jobs.listJobs, {})
+    const processedSourceIds = new Set(
+      jobs
+        .map(j => (j as { sourceMessageId?: string }).sourceMessageId)
+        .filter((id): id is string => Boolean(id)),
+    )
+
+    let createdCount = 0
+    for (const msg of messages) {
+      if (msg.messageId && processedSourceIds.has(msg.messageId)) {
+        continue
+      }
+
+      const rawFrom = String(msg.from || '')
+      const senderEmail = extractEmail(rawFrom)
+      if (!senderEmail || senderEmail.includes('agentmail.to')) {
+        continue
+      }
+
+      let rawBody = String(msg.preview || '').trim()
+      let subject = String(msg.subject || '').trim()
+      try {
+        const fullMsg = await client.inboxes.messages.get(
+          primaryInbox.inboxId,
+          msg.messageId,
+        )
+        rawBody = String(
+          fullMsg.text || fullMsg.extractedText || fullMsg.preview || rawBody,
+        ).trim()
+        if (fullMsg.subject) subject = String(fullMsg.subject).trim()
+      } catch {}
+
+      if (!rawBody && !subject) continue
+
+      const lower = `${subject} ${rawBody}`.toLowerCase()
+      if (
+        lower.includes('automatic reply') ||
+        lower.includes('auto-reply') ||
+        lower.includes('autoreply') ||
+        lower.includes('out of office') ||
+        lower.includes('mailer-daemon') ||
+        lower.includes('undelivered')
+      ) {
+        if (msg.messageId) processedSourceIds.add(msg.messageId)
+        continue
+      }
+
+      const fullTask = subject ? `${subject}\n\n${rawBody}` : rawBody
+
+      const alreadyExists = jobs.some(
+        j =>
+          (msg.messageId &&
+            (j as { sourceMessageId?: string }).sourceMessageId ===
+              msg.messageId) ||
+          (j.userEmail === senderEmail &&
+            Date.now() - j.createdAt < 600000 &&
+            j.rawTask === fullTask),
+      )
+
+      if (!alreadyExists) {
+        try {
+          await ctx.runAction(api.agent.startPipeline, {
+            userEmail: senderEmail,
+            rawTask: fullTask,
+            sourceMessageId: msg.messageId,
+          })
+          if (msg.messageId) processedSourceIds.add(msg.messageId)
+          createdCount++
+        } catch (err) {
+          console.error('Failed to start pipeline for inbound message:', err)
+        }
+      }
+    }
+
+    return { created: createdCount, totalFetched: messages.length }
+  },
+})
+
+export const syncAllActiveInboxes = internalAction({
+  args: {},
+  handler: async ctx => {
+    try {
+      await ctx.runAction(api.agent.syncPrimaryInbound, {})
+    } catch (err) {
+      console.error('Failed to sync primary inbound:', err)
+    }
+
+    const jobs = await ctx.runQuery(api.jobs.listJobs, {})
+    const activeJobs = jobs.filter(
+      j => j.status === 'awaiting_replies' || j.status === 'needs_decision',
+    )
+    for (const job of activeJobs) {
+      if (job.agentInboxId) {
+        try {
+          await ctx.runAction(api.agent.syncInboxMessages, { jobId: job._id })
+        } catch (err) {
+          console.error(`Cron sync failed for job ${job._id}:`, err)
+        }
+      }
+    }
   },
 })
