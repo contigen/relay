@@ -9,9 +9,11 @@
  */
 
 import type * as agent from "../agent.js";
+import type * as crons from "../crons.js";
 import type * as decisions from "../decisions.js";
 import type * as http from "../http.js";
 import type * as jobs from "../jobs.js";
+import type * as templates from "../templates.js";
 import type * as threads from "../threads.js";
 
 import type {
@@ -22,9 +24,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   agent: typeof agent;
+  crons: typeof crons;
   decisions: typeof decisions;
   http: typeof http;
   jobs: typeof jobs;
+  templates: typeof templates;
   threads: typeof threads;
 }>;
 

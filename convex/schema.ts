@@ -41,6 +41,7 @@ export default defineSchema({
         }),
       ),
     ),
+    sourceMessageId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

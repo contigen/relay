@@ -91,3 +91,10 @@ export const getMessagesByJob = query({
       .collect()
   },
 })
+
+export const getThread = query({
+  args: { threadId: v.id('threads') },
+  handler: async (ctx, { threadId }) => {
+    return await ctx.db.get(threadId)
+  },
+})

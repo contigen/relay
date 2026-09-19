@@ -5,12 +5,14 @@ export const createJob = mutation({
   args: {
     userEmail: v.string(),
     rawTask: v.string(),
+    sourceMessageId: v.optional(v.string()),
   },
-  handler: async (ctx, { userEmail, rawTask }) => {
+  handler: async (ctx, { userEmail, rawTask, sourceMessageId }) => {
     const now = Date.now()
     const jobId = await ctx.db.insert('jobs', {
       userEmail,
       rawTask,
+      sourceMessageId,
       status: 'received',
       createdAt: now,
       updatedAt: now,
